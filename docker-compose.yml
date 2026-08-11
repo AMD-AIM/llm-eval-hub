@@ -1,0 +1,117 @@
+name: zihao-llm-eval-hub
+
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: apps/api/Dockerfile
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    DATABASE_URL: postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/evalhub
+    REDIS_URL: redis://redis:6379/0
+    CELERY_BROKER_URL: redis://redis:6379/1
+    CELERY_RESULT_BACKEND: redis://redis:6379/2
+    ARTIFACT_ROOT: /var/lib/eval-hub/artifacts
+    HF_HOME: /workspace/hf_cache
+    HF_HUB_CACHE: /workspace/hf_cache/hub
+    HF_DATASETS_CACHE: /workspace/hf_cache/datasets
+    HUGGINGFACE_HUB_CACHE: /workspace/hf_cache/hub
+    ADMIN_API_KEY: ${ADMIN_API_KEY:-zihao-local-dev-key}
+    SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:-}
+    ALLOWED_ENDPOINT_HOSTS: ${ALLOWED_ENDPOINT_HOSTS:-mock-openai,host.docker.internal}
+    ALLOWED_ENDPOINT_CIDRS: ${ALLOWED_ENDPOINT_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
+    ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:-true}
+    WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:18080}
+  volumes:
+    - ./artifacts:/var/lib/eval-hub/artifacts
+    - ./hf_cache:/workspace/hf_cache
+  extra_hosts:
+    - host.docker.internal:host-gateway
+
+services:
+  postgres:
+    image: postgres:16.9-alpine
+    container_name: zihao-evalhub-postgres
+    environment:
+      POSTGRES_DB: evalhub
+      POSTGRES_USER: evalhub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-evalhub}
+    volumes:
+      - zihao_evalhub_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evalhub -d evalhub"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4.5-alpine
+    container_name: zihao-evalhub-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - zihao_evalhub_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    <<: *backend
+    container_name: zihao-evalhub-api
+    command: >-
+      sh -c "alembic upgrade head &&
+      uvicorn apps.api.app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "18000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  worker:
+    <<: *backend
+    container_name: zihao-evalhub-worker
+    command: celery -A workers.celery_app worker -Q native --concurrency=4 --loglevel=INFO
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mock-openai:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: zihao-evalhub-mock-openai
+    command: uvicorn tests.fixtures.mock_openai:app --host 0.0.0.0 --port 8001
+    ports:
+      - "18001:8001"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: apps/web
+      dockerfile: Dockerfile
+    container_name: zihao-evalhub-web
+    ports:
+      - "18080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  zihao_evalhub_pgdata:
+    name: zihao_evalhub_pgdata
+  zihao_evalhub_redisdata:
+    name: zihao_evalhub_redisdata
