@@ -23,7 +23,7 @@ class MetadataSpec(BaseModel):
 
     name: str
     display_name: str
-    version: str
+    version: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
     description: str = ""
     language: list[str] = Field(default_factory=list)
     license: str
@@ -151,10 +151,11 @@ def validate_dataset(
         )
 
     manifest = DatasetManifest.model_validate(raw)
+    declared_data_path = (manifest_path.parent / manifest.data.path).resolve()
+    if manifest_path.parent not in declared_data_path.parents:
+        raise DatasetValidationError(["data.path must stay inside the manifest directory"])
     if data_path_override is None:
-        data_path = (manifest_path.parent / manifest.data.path).resolve()
-        if manifest_path.parent not in data_path.parents:
-            raise DatasetValidationError(["data.path must stay inside the manifest directory"])
+        data_path = declared_data_path
     else:
         data_path = Path(data_path_override).resolve()
     if not data_path.is_file():

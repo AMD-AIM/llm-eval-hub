@@ -4,6 +4,7 @@ x-backend: &backend
   build:
     context: .
     dockerfile: apps/api/Dockerfile
+    target: runtime
   env_file:
     - path: .env
       required: false
@@ -92,11 +93,144 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
+      target: runtime
     container_name: zihao-evalhub-mock-openai
     command: uvicorn tests.fixtures.mock_openai:app --host 0.0.0.0 --port 8001
     ports:
       - "18001:8001"
     restart: unless-stopped
+
+  integration-tests:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: test
+    container_name: zihao-evalhub-integration-tests
+    command: pytest -m integration
+    environment:
+      EVALHUB_TEST_DATABASE_SERVER_URL: >-
+        postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/postgres
+      EVALHUB_TEST_REDIS_URL: redis://redis:6379/15
+      EVALHUB_TEST_MOCK_BASE_URL: http://mock-openai:8001/v1
+      REDIS_URL: redis://redis:6379/15
+      CELERY_BROKER_URL: redis://redis:6379/15
+      CELERY_RESULT_BACKEND: redis://redis:6379/15
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mock-openai:
+        condition: service_started
+    profiles: [test]
+
+  capacity-experiment:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: test
+    container_name: zihao-evalhub-capacity-experiment
+    command: python -m tests.experiments.run_capacity
+    environment:
+      EVALHUB_TEST_DATABASE_SERVER_URL: >-
+        postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/postgres
+      EVALHUB_TEST_REDIS_URL: redis://redis:6379/15
+      EVALHUB_TEST_MOCK_BASE_URL: http://mock-openai:8001/v1
+      EVALHUB_GIT_SHA: ${EVALHUB_GIT_SHA:-working-tree}
+      REDIS_URL: redis://redis:6379/15
+      CELERY_BROKER_URL: redis://redis:6379/15
+      CELERY_RESULT_BACKEND: redis://redis:6379/15
+    volumes:
+      - ./artifacts:/workspace/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mock-openai:
+        condition: service_started
+    profiles: [experiment]
+
+  qps-experiment:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: test
+    container_name: zihao-evalhub-qps-experiment
+    command: python -m tests.experiments.run_shared_qps
+    environment:
+      EVALHUB_TEST_DATABASE_SERVER_URL: >-
+        postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/postgres
+      EVALHUB_TEST_REDIS_URL: redis://redis:6379/15
+      EVALHUB_TEST_MOCK_BASE_URL: http://mock-openai:8001/v1
+      EVALHUB_GIT_SHA: ${EVALHUB_GIT_SHA:-working-tree}
+      REDIS_URL: redis://redis:6379/15
+      CELERY_BROKER_URL: redis://redis:6379/15
+      CELERY_RESULT_BACKEND: redis://redis:6379/15
+    volumes:
+      - ./artifacts:/workspace/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mock-openai:
+        condition: service_started
+    profiles: [experiment]
+
+  faults-experiment:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: test
+    container_name: zihao-evalhub-faults-experiment
+    command: python -m tests.experiments.run_faults_retry
+    environment:
+      EVALHUB_TEST_DATABASE_SERVER_URL: >-
+        postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/postgres
+      EVALHUB_TEST_REDIS_URL: redis://redis:6379/15
+      EVALHUB_TEST_MOCK_BASE_URL: http://mock-openai:8001/v1
+      EVALHUB_GIT_SHA: ${EVALHUB_GIT_SHA:-working-tree}
+      REDIS_URL: redis://redis:6379/15
+      CELERY_BROKER_URL: redis://redis:6379/15
+      CELERY_RESULT_BACKEND: redis://redis:6379/15
+    volumes:
+      - ./artifacts:/workspace/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mock-openai:
+        condition: service_started
+    profiles: [experiment]
+
+  cancel-experiment:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: test
+    container_name: zihao-evalhub-cancel-experiment
+    command: python -m tests.experiments.run_cancel
+    environment:
+      EVALHUB_TEST_DATABASE_SERVER_URL: >-
+        postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/postgres
+      EVALHUB_TEST_REDIS_URL: redis://redis:6379/15
+      EVALHUB_TEST_MOCK_BASE_URL: http://mock-openai:8001/v1
+      EVALHUB_GIT_SHA: ${EVALHUB_GIT_SHA:-working-tree}
+      REDIS_URL: redis://redis:6379/15
+      CELERY_BROKER_URL: redis://redis:6379/15
+      CELERY_RESULT_BACKEND: redis://redis:6379/15
+    volumes:
+      - ./artifacts:/workspace/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mock-openai:
+        condition: service_started
+    profiles: [experiment]
 
   web:
     build:

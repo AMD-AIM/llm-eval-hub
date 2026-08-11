@@ -4,7 +4,52 @@
 > 编写日期：2026-08-11  
 > 适用范围：Phase 1 MVP 收口、Phase 2 标准 Benchmark 与回归能力  
 > 执行目录：`/home/zihaomu/bigssd_workspace/model_benchmark`  
-> 状态：待评审后执行
+> 状态：执行中（Phase 1 / P1-10 待执行）
+
+## 0. 实时执行状态
+
+> 最后更新：2026-08-11 18:30 CST
+
+| 项目 | 状态 | 当前证据/结果 |
+|---|---|---|
+| P1-00 Git 实验基线 | DONE | commit `6996352`；tag `mvp-experiment-baseline`；敏感和运行时文件未纳入提交 |
+| P1-01 Clean deploy/migration | DONE | `0001` 已改为显式 op；3 个独立临时库连续通过 upgrade/re-upgrade/check/downgrade，单次 `1 passed` |
+| W1 确定性实验 fixtures | DONE | seed `20260811` 生成 100/1,000/120/100 条；manifest/expected/lock 已冻结；专项测试 `10 passed` |
+| W1 PostgreSQL/Redis/Celery 生命周期 | DONE | 随机库 + Redis DB 15 + in-process Celery worker 完成 100 样本 run 和重复投递幂等验证 |
+| P1-02 Dataset/API | DONE | 两版本 + 8 类错误边界通过；版本与 data path 防 traversal；稳定 409/422 code |
+| P1-03 Scoring oracle | DONE | 独立标准库 oracle 复算 F1/numeric/percentile/denominator，专项 `5 passed`，误差 `<=1e-12` |
+| P1-04 Fingerprint | DONE | 冻结 digest；map 顺序稳定；prompt/scorer/checksum/seed 变更矩阵 `8 passed` |
+| W2 Redis 共享调度原语 | DONE | Redis TIME + Lua 全局 QPS slot/lease semaphore；共享与过期恢复 integration 通过 |
+| W2 shard/claim/聚合 | DONE | migration `0002`；50 样本 shard；过期 claim；chord finalize 行锁；重复 dispatch 幂等 |
+| P1-05 Capacity | DONE | 4 档 concurrency × 3 次共 12 个 1,000 样本 run 全通过；API P95 最大 21.19ms |
+| P1-06 Shared QPS | DONE | QPS 10/50 合并滑窗峰值 11/49；两组各 200 请求且两个 run 均完成 |
+| P1-07/P1-08 Fault + retry | DONE | 初始 210 attempts；35 transient 仅重试一次；最终 245 attempts，指标完全匹配 |
+| P1-09 Cancel | DONE | completed=52 时取消；67 succeeded/933 cancelled；取消后新增请求 0；导出 1,000 行 |
+| P1-10 Worker crash | NOT STARTED | 下一项：运行中杀死 worker，验证 claim expiry、redelivery 和唯一 score revision |
+| 当前回归/部署 | DONE | 50 unit/contract + 6 integration；Ruff/ESLint/build 通过；Compose healthy；主库 head `0002` |
+| P1-11 至 P1-13 | NOT STARTED | 按实验矩阵继续执行 |
+| B2/R2 Phase 2 | NOT STARTED | 必须先通过 Phase 1 退出门 |
+
+状态枚举：`NOT STARTED`、`IN PROGRESS`、`BLOCKED`、`DONE`。只有实验断言和证据落盘后才能标记 `DONE`。
+
+### 0.1 执行日志
+
+| 时间 | 变更 | 验证 |
+|---|---|---|
+| 2026-08-11 | 建立实验基线 | commit `6996352`，tag `mvp-experiment-baseline`；敏感/运行时文件未提交 |
+| 2026-08-11 | 初始 migration 不再导入当前 ORM 执行 `create_all/drop_all`；增加隔离 test image 和 migration integration test | 连续 3 个随机临时数据库通过 upgrade、重复 upgrade、autogenerate drift check 和 downgrade |
+| 2026-08-11 | 新增 seed `20260811` 数据生成器、四套冻结 fixture、mock 确定性故障控制与 reset/state 端点 | 字节级重生成、四套 manifest、预期样本数和 mock adapter 契约共 `10 passed`；data SHA-256 见 `datasets/experiments/fixture-lock.json` |
+| 2026-08-11 | 新增随机 PostgreSQL + Redis broker + Celery worker 的 100 样本 run lifecycle integration test | `2 passed` integration；重复任务后仍为 100 execution/attempt/score，主指标 `accuracy=1.0`；其余 unit/contract `38 passed`，Ruff 通过 |
+| 2026-08-11 | 完成 P1-02 Dataset/API；修复 duplicate dataset 事务边界和上传失败 artifact 清理，收紧 version/data path | 两个合法版本和 duplicate/missing/invalid JSON/checksum/name/path/version 错误通过；integration `3 passed`，unit/contract `40 passed` |
+| 2026-08-11 | 新增不导入生产评分代码的 scoring oracle | 500 条混合状态在 4 套分母策略下复算一致；numeric `90/100`、5 parse error 一致；专项 `5 passed` |
+| 2026-08-11 | 冻结完整 run spec fingerprint 和敏感输入矩阵 | digest `cb0da948...5534f07b`；重复/重排稳定，prompt/scorer/checksum/seed 逐项变化；fingerprint 专项 `8 passed` |
+| 2026-08-11 | worker HTTP 调用接入 endpoint revision 级 Redis QPS 和 concurrency gate | 两实例 20 QPS 间隔、并发峰值 2、80ms lease 恢复均通过；含 run lifecycle 共 integration `6 passed` |
+| 2026-08-11 | 新增 execution claim migration `0002`，run 拆为 20–100 样本 Celery chord shard | 100 样本按 2×50 执行；终态 100 execution/attempt/score；重复 dispatch 0 shard；migration drift 与 integration `6 passed` |
+| 2026-08-11 | 执行 P1-05 容量矩阵；首次采样发现 semaphore 等待长租约和进度全表 count 热点，修复后从零重跑 | 12/12 正式 run 守恒且 accuracy `1.0`；DB 连接峰值 5–6；API P95 最大 21.19ms；证据 `artifacts/experiments/P1-05-capacity-20260811T100652Z/` |
+| 2026-08-11 | 执行 P1-06；首轮发现未来 slot 预留导致唤醒压缩，改为到点原子竞争并重跑 | QPS 10：峰值 11/允许 11；QPS 50：峰值 49/允许 51；两个 run 均成功；PASS 证据 `artifacts/experiments/P1-06-shared-qps-20260811T101907Z/`，失败证据保留在前一目录 |
+| 2026-08-11 | 执行 P1-07/P1-08；首轮 50ms timeout 混入 mock 调度抖动，调整为 150ms/并发 4 后重跑 | P1-07：120 样本、210 attempts、95 API/15 parse、accuracy 0.4；P1-08：仅 35 transient 重跑，245 attempts、accuracy 0.75；证据 `artifacts/experiments/P1-07-08-fault-retry-20260811T102324Z/` |
+| 2026-08-11 | 执行 P1-09 取消实验，mock 统一延迟 100ms | completed=52 时取消；最终 67 succeeded + 933 cancelled = 1,000；取消后新增请求 0；导出 1,000 行；证据 `artifacts/experiments/P1-09-cancel-20260811T102548Z/` |
+| 2026-08-11 | 本轮全量回归并重建运行栈 | unit/contract `50 passed`；integration `6 passed`；Ruff、ESLint、Vite build 通过；所有 `zihao` 服务在线，API healthy，主数据库 migration head `20260811_0002` |
 
 ## 1. 实验目标
 
@@ -19,7 +64,7 @@
 
 本轮不实现 LLM-as-judge、RAG/Agent 评测、Kubernetes、多租户计费和公共排行榜。
 
-## 2. 当前基线与差距
+## 2. 实验启动基线与差距（历史快照）
 
 ### 2.1 已有基线
 
@@ -27,13 +72,13 @@
 - Endpoint、Dataset、Run API 和 16 张核心表已实现。
 - Native `render -> infer -> parse -> score -> aggregate` 已跑通。
 - 12 条固定数据集 E2E 已通过，accuracy/macro/micro F1 均为 `1.0`。
-- 当前自动化回归为 `31 passed`，Ruff、ESLint 和前端 production build 通过。
+- 实验启动时自动化回归为 `31 passed`，Ruff、ESLint 和前端 production build 通过。
 - 容器、Compose project 和 volume 均使用 `zihao` 前缀。
 - HF 相关目录已映射到仓库内 `hf_cache/`，当前没有下载 HF 内容。
 
 ### 2.2 必须在 Phase 1 收口的差距
 
-| 编号 | 当前状态 | Phase 1 要求 |
+| 编号 | 启动时状态 | Phase 1 要求 |
 |---|---|---|
 | G1 | Alembic `0001` 调用当前 ORM 的 `metadata.create_all/drop_all` | 改为历史稳定的显式 migration op；全新库可升级，生产 migration 不依赖未来 ORM |
 | G2 | `tests/integration/` 为空，E2E 主要为人工验证 | 建立 PostgreSQL + Redis + Celery 自动化生命周期测试和 Playwright 浏览器 E2E |
@@ -445,4 +490,3 @@ CI 创建接口必须支持 `Idempotency-Key` 和 scoped service token。最终�
 - [CMMLU task说明](https://github.com/EleutherAI/lm-evaluation-harness/blob/v0.4.12/lm_eval/tasks/cmmlu/README.md)
 - [GSM8K generate_until 配置](https://github.com/EleutherAI/lm-evaluation-harness/blob/v0.4.12/lm_eval/tasks/gsm8k/gsm8k.yaml)
 - [IFEval generate_until 配置](https://github.com/EleutherAI/lm-evaluation-harness/blob/v0.4.12/lm_eval/tasks/ifeval/ifeval.yaml)
-

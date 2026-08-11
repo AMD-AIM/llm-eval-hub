@@ -15,5 +15,7 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_track_started=True,
     broker_connection_retry_on_startup=True,
-    task_routes={"workers.tasks.run_eval.execute_run": {"queue": "native"}},
+    broker_transport_options={"visibility_timeout": 60},
+    result_backend_transport_options={"visibility_timeout": 60},
+    task_routes={"workers.tasks.run_eval.*": {"queue": "native"}},
 )

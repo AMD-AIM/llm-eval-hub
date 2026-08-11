@@ -58,16 +58,16 @@ def create_dataset(
     db: Session = Depends(get_db),
 ) -> Dataset:
     dataset = Dataset(**payload.model_dump())
-    db.add(dataset)
-    db.flush()
-    record_audit(
-        db,
-        actor=actor.username,
-        action="dataset.create",
-        resource_type="dataset",
-        resource_id=dataset.id,
-    )
     try:
+        db.add(dataset)
+        db.flush()
+        record_audit(
+            db,
+            actor=actor.username,
+            action="dataset.create",
+            resource_type="dataset",
+            resource_id=dataset.id,
+        )
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -151,41 +151,55 @@ def upload_dataset_version(
         raise HTTPException(status_code=409, detail={"code": "DATASET_VERSION_IMMUTABLE"})
 
     destination = settings.artifact_root / "datasets" / dataset.id / version
-    destination.mkdir(parents=True, exist_ok=False)
+    try:
+        destination.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail={"code": "DATASET_VERSION_IMMUTABLE"}) from exc
     manifest_path = destination / "manifest.yaml"
     data_path = destination / "data.jsonl"
     frozen_manifest = validated.manifest.model_dump(mode="json", exclude_none=True)
-    manifest_path.write_text(
-        yaml.safe_dump(
-            frozen_manifest,
-            allow_unicode=True,
-            sort_keys=False,
-        ),
-        encoding="utf-8",
-    )
-    data_file.file.seek(0)
-    with data_path.open("wb") as destination_file:
-        shutil.copyfileobj(data_file.file, destination_file)
-    dataset_version = DatasetVersion(
-        dataset_id=dataset.id,
-        version=version,
-        manifest_json=frozen_manifest,
-        manifest_uri=str(manifest_path),
-        data_uri=str(data_path),
-        checksum=validated.checksum_sha256,
-        row_count=len(validated.samples),
-    )
-    db.add(dataset_version)
-    db.flush()
-    record_audit(
-        db,
-        actor=actor.username,
-        action="dataset.version.create",
-        resource_type="dataset_version",
-        resource_id=dataset_version.id,
-        metadata={"checksum": validated.checksum_sha256, "row_count": len(validated.samples)},
-    )
-    db.commit()
+    try:
+        manifest_path.write_text(
+            yaml.safe_dump(
+                frozen_manifest,
+                allow_unicode=True,
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        data_file.file.seek(0)
+        with data_path.open("wb") as destination_file:
+            shutil.copyfileobj(data_file.file, destination_file)
+        dataset_version = DatasetVersion(
+            dataset_id=dataset.id,
+            version=version,
+            manifest_json=frozen_manifest,
+            manifest_uri=str(manifest_path),
+            data_uri=str(data_path),
+            checksum=validated.checksum_sha256,
+            row_count=len(validated.samples),
+        )
+        db.add(dataset_version)
+        db.flush()
+        record_audit(
+            db,
+            actor=actor.username,
+            action="dataset.version.create",
+            resource_type="dataset_version",
+            resource_id=dataset_version.id,
+            metadata={"checksum": validated.checksum_sha256, "row_count": len(validated.samples)},
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        shutil.rmtree(destination, ignore_errors=True)
+        raise HTTPException(
+            status_code=409, detail={"code": "DATASET_VERSION_IMMUTABLE"}
+        ) from exc
+    except Exception:
+        db.rollback()
+        shutil.rmtree(destination, ignore_errors=True)
+        raise
     db.refresh(dataset_version)
     return dataset_version
 

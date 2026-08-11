@@ -22,6 +22,7 @@ class ExecutionConfig(BaseModel):
     qps: float = Field(default=10, gt=0, le=1000)
     timeout_seconds: float = Field(default=60, gt=0, le=3600)
     max_retries: int = Field(default=2, ge=0, le=10)
+    shard_size: int = Field(default=50, ge=20, le=100)
 
 
 class RunCreate(BaseModel):

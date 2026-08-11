@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 import time
-import uuid
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -11,6 +11,10 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Eval Hub Mock OpenAI")
+_attempts_by_sample: dict[str, int] = {}
+_request_log: list[dict[str, Any]] = []
+_faults_enabled = True
+_default_delay_ms = 0
 
 
 class ChatRequest(BaseModel):
@@ -26,6 +30,43 @@ class ChatRequest(BaseModel):
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/__control/reset")
+def reset() -> dict[str, int]:
+    global _default_delay_ms, _faults_enabled
+    cleared = len(_attempts_by_sample)
+    _attempts_by_sample.clear()
+    _request_log.clear()
+    _faults_enabled = True
+    _default_delay_ms = 0
+    return {"cleared_samples": cleared}
+
+
+@app.post("/__control/faults/{enabled}")
+def faults(enabled: bool) -> dict[str, bool]:
+    global _faults_enabled
+    _faults_enabled = enabled
+    return {"faults_enabled": _faults_enabled}
+
+
+@app.post("/__control/delay/{delay_ms}")
+def delay(delay_ms: int) -> dict[str, int]:
+    global _default_delay_ms
+    if delay_ms < 0 or delay_ms > 60_000:
+        raise HTTPException(status_code=422, detail="delay_ms must be between 0 and 60000")
+    _default_delay_ms = delay_ms
+    return {"default_delay_ms": _default_delay_ms}
+
+
+@app.get("/__control/state")
+def state() -> dict[str, Any]:
+    return {
+        "attempts_by_sample": dict(sorted(_attempts_by_sample.items())),
+        "requests": list(_request_log),
+        "faults_enabled": _faults_enabled,
+        "default_delay_ms": _default_delay_ms,
+    }
 
 
 @app.get("/v1/models")
@@ -54,23 +95,47 @@ def _intent(text: str) -> str:
 @app.post("/v1/chat/completions")
 async def chat(payload: ChatRequest):
     text = "\n".join(str(message.get("content", "")) for message in payload.messages)
-    if "[http:401]" in text:
+    sample_match = re.search(r"\[sample-id:([A-Za-z0-9_-]+)\]", text)
+    sample_id = sample_match.group(1) if sample_match else hashlib.sha256(text.encode()).hexdigest()
+    attempt = _attempts_by_sample.get(sample_id, 0) + 1
+    _attempts_by_sample[sample_id] = attempt
+    _request_log.append(
+        {"sample_id": sample_id, "attempt": attempt, "monotonic_ns": time.monotonic_ns()}
+    )
+    fail_first = re.search(r"\[fail-first:(\d+):(\d{3})\]", text) if _faults_enabled else None
+    if fail_first and attempt <= int(fail_first.group(1)):
+        status_code = int(fail_first.group(2))
+        headers = {"Retry-After": "0.01"} if status_code == 429 else None
+        raise HTTPException(status_code=status_code, detail="forced transient", headers=headers)
+    if _faults_enabled and "[http:401]" in text:
         raise HTTPException(status_code=401, detail="forced")
-    if "[http:429]" in text:
+    if _faults_enabled and "[http:429]" in text:
         raise HTTPException(status_code=429, detail="forced", headers={"Retry-After": "0.01"})
-    if "[http:500]" in text:
+    if _faults_enabled and "[http:500]" in text:
         raise HTTPException(status_code=500, detail="forced")
-    if "[invalid-json]" in text:
+    if _faults_enabled and "[invalid-json]" in text:
         return PlainTextResponse("not-json", media_type="application/json")
-    delay = re.search(r"\[delay:(\d+(?:\.\d+)?)\]", text)
+    if _faults_enabled and "[schema-mismatch]" in text:
+        return {"id": "schema-fault", "choices": []}
+    delay = re.search(r"\[delay:(\d+(?:\.\d+)?)\]", text) if _faults_enabled else None
     if delay:
         await asyncio.sleep(float(delay.group(1)))
-    answer = "" if "[empty]" in text else _intent(text)
+    elif _default_delay_ms:
+        await asyncio.sleep(_default_delay_ms / 1000)
+    numeric_output = re.search(r"\[numeric-output:([^\]]+)\]", text)
+    if _faults_enabled and "[empty]" in text:
+        answer = ""
+    elif _faults_enabled and "[parse-error]" in text:
+        answer = "unsupported-label"
+    elif numeric_output:
+        answer = numeric_output.group(1)
+    else:
+        answer = _intent(text)
     prompt_tokens = max(1, len(text) // 4)
     return {
-        "id": f"chatcmpl-{uuid.uuid4().hex}",
+        "id": f"chatcmpl-{hashlib.sha256(f'{sample_id}:{attempt}'.encode()).hexdigest()[:24]}",
         "object": "chat.completion",
-        "created": int(time.time()),
+        "created": 0,
         "model": payload.model,
         "choices": [
             {

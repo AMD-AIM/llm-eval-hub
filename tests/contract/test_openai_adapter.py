@@ -51,3 +51,54 @@ async def test_adapter_keeps_invalid_json_separate_from_model_error() -> None:
 
     assert result.error_type == "response.invalid_json"
     assert result.output_text is None
+
+
+@pytest.mark.asyncio
+async def test_mock_fail_first_is_deterministic_and_resettable() -> None:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post("/__control/reset")
+    adapter = OpenAICompatibleAdapter(base_url="http://test/v1", transport=transport, max_retries=2)
+
+    first = await adapter.infer(
+        request("[sample-id:retry-case-1] [fail-first:2:429] 如何退款？")
+    )
+    second = await adapter.infer(
+        request("[sample-id:retry-case-1] [fail-first:2:429] 如何退款？")
+    )
+
+    assert first.error_type is None
+    assert first.output_text == "billing"
+    assert first.attempts == 3
+    assert [trace.http_status for trace in first.attempt_traces] == [429, 429, 200]
+    assert second.attempts == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("marker", "error_type"),
+    [
+        ("[schema-mismatch]", "response.schema_mismatch"),
+        ("[empty]", "response.empty"),
+    ],
+)
+async def test_mock_response_faults_have_stable_error_types(
+    marker: str, error_type: str
+) -> None:
+    transport = httpx.ASGITransport(app=app)
+    adapter = OpenAICompatibleAdapter(base_url="http://test/v1", transport=transport, max_retries=0)
+
+    result = await adapter.infer(request(marker))
+
+    assert result.error_type == error_type
+
+
+@pytest.mark.asyncio
+async def test_mock_numeric_output_is_exact() -> None:
+    transport = httpx.ASGITransport(app=app)
+    adapter = OpenAICompatibleAdapter(base_url="http://test/v1", transport=transport, max_retries=0)
+
+    result = await adapter.infer(request("[numeric-output:-12.495]"))
+
+    assert result.error_type is None
+    assert result.output_text == "-12.495"

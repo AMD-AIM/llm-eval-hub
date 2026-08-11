@@ -221,6 +221,7 @@ class SampleExecution(Base):
         UniqueConstraint("run_dataset_id", "sample_id", name="uq_execution_sample"),
         Index("ix_execution_run_status", "run_dataset_id", "status"),
         Index("ix_execution_error_type", "error_type"),
+        Index("ix_execution_claim_expiry", "status", "claim_expires_at"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -243,6 +244,10 @@ class SampleExecution(Base):
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message_redacted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claim_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    claim_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

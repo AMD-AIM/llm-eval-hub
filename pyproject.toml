@@ -42,6 +42,9 @@ namespaces = true
 addopts = "-q --strict-markers"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+  "integration: requires disposable PostgreSQL/Redis services",
+]
 
 [tool.ruff]
 target-version = "py312"

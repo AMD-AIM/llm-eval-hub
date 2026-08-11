@@ -306,6 +306,8 @@ def retry_run_failures(
         execution.completion_tokens = None
         execution.error_type = None
         execution.error_message_redacted = None
+        execution.claim_token = None
+        execution.claim_expires_at = None
         execution.started_at = None
         execution.completed_at = None
     for run_dataset in run.datasets:

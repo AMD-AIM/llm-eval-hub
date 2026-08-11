@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from celery import chord
 from celery.utils.log import get_task_logger
-from sqlalchemy import delete, func, select
-from sqlalchemy.orm import selectinload
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.orm import Session, selectinload
 
 from apps.api.app.core.crypto import SecretCipher
+from apps.api.app.core.settings import get_settings
 from apps.api.app.db.models import (
     DatasetVersion,
     EndpointRevision,
@@ -41,45 +44,49 @@ from packages.eval_engine.parsers import create_parser
 from packages.eval_engine.rendering import JinjaPromptRenderer
 from packages.eval_engine.scorers import create_scorer
 from workers.celery_app import celery_app
+from workers.scheduling import RedisEndpointLimiter
 
 logger = get_task_logger(__name__)
 TERMINAL_SAMPLE_STATUSES = {"SUCCEEDED", "API_ERROR", "PARSE_ERROR", "SCORE_ERROR", "CANCELLED"}
+TERMINAL_RUN_STATUSES = {"SUCCEEDED", "FAILED", "CANCELLED"}
 
 
-class AsyncRateLimiter:
-    def __init__(self, qps: float):
-        self.interval = 1 / qps if qps > 0 else 0
-        self.lock = asyncio.Lock()
-        self.next_allowed = 0.0
-
-    async def wait(self) -> None:
-        async with self.lock:
-            loop = asyncio.get_running_loop()
-            now = loop.time()
-            delay = max(0.0, self.next_allowed - now)
-            if delay:
-                await asyncio.sleep(delay)
-            self.next_allowed = loop.time() + self.interval
+class RunNotReady(RuntimeError):
+    pass
 
 
-def _cancel_if_requested(execution_id: str) -> bool:
+def _chunks(values: list[str], size: int) -> list[list[str]]:
+    return [values[index : index + size] for index in range(0, len(values), size)]
+
+
+def _claim_seconds(execution_config: dict[str, Any]) -> float:
+    attempts = int(execution_config["max_retries"]) + 1
+    request_time = float(execution_config["timeout_seconds"]) * attempts
+    backoff_time = sum(min(8.0, 0.25 * (2**index)) for index in range(attempts - 1))
+    return request_time + backoff_time + 10
+
+
+def _mark_run_failed(run_id: str, exc: Exception) -> None:
+    logger.exception("Run failed run_id=%s", run_id)
     with SessionLocal() as db:
-        execution = db.get(SampleExecution, execution_id)
-        if execution is None:
-            return True
-        run_dataset = db.get(RunDataset, execution.run_dataset_id)
-        run = db.get(Run, run_dataset.run_id) if run_dataset else None
-        if run is not None and not run.cancel_requested:
-            return False
-        execution.status = "CANCELLED"
-        execution.completed_at = datetime.now(UTC)
+        run = db.get(Run, run_id)
+        if run is None or run.status in TERMINAL_RUN_STATUSES:
+            return
+        run.status = "FAILED"
+        run.error_message = f"{type(exc).__name__}: {str(exc)[:500]}"
+        run.completed_at = datetime.now(UTC)
+        for run_dataset in db.scalars(
+            select(RunDataset).where(
+                RunDataset.run_id == run_id,
+                RunDataset.status.not_in({"SUCCEEDED", "CANCELLED"}),
+            )
+        ):
+            run_dataset.status = "FAILED"
         db.commit()
-        return True
 
 
-def _materialize(run_dataset: RunDataset, version: DatasetVersion) -> dict[str, EvalSample]:
+def _materialize(run_dataset: RunDataset, version: DatasetVersion) -> None:
     validated = validate_dataset(Path(version.manifest_uri), Path(version.data_uri))
-    samples = {sample.sample_id: sample for sample in validated.samples}
     with SessionLocal() as db:
         existing = set(
             db.scalars(
@@ -101,35 +108,43 @@ def _materialize(run_dataset: RunDataset, version: DatasetVersion) -> dict[str, 
                 )
             )
         db.commit()
-    return samples
 
 
-async def _execute_sample(
-    *,
+def _claim_execution(
     execution_id: str,
-    sample: EvalSample,
-    renderer: JinjaPromptRenderer,
-    adapter: OpenAICompatibleAdapter,
-    parser_config: dict[str, Any],
-    scorer_config: dict[str, Any],
-    limiter: AsyncRateLimiter,
-    semaphore: asyncio.Semaphore,
-) -> None:
+    request: ModelRequest,
+    claim_seconds: float,
+) -> tuple[str, str | None, int]:
+    now = datetime.now(UTC)
     with SessionLocal() as db:
-        execution = db.get(SampleExecution, execution_id)
+        execution = db.scalar(
+            select(SampleExecution)
+            .where(SampleExecution.id == execution_id)
+            .with_for_update()
+        )
         if execution is None or execution.status in TERMINAL_SAMPLE_STATUSES:
-            return
+            return "terminal", None, 0
         run_dataset = db.get(RunDataset, execution.run_dataset_id)
         run = db.get(Run, run_dataset.run_id) if run_dataset else None
-        if run is None or run.cancel_requested:
-            if execution:
-                execution.status = "CANCELLED"
-                execution.completed_at = datetime.now(UTC)
-                db.commit()
-            return
+        if run is None or run.cancel_requested or run.status == "CANCELLED":
+            execution.status = "CANCELLED"
+            execution.claim_token = None
+            execution.claim_expires_at = None
+            execution.completed_at = now
+            db.commit()
+            return "terminal", None, 0
+        if (
+            execution.status == "RUNNING"
+            and execution.claim_expires_at is not None
+            and execution.claim_expires_at > now
+        ):
+            return "busy", None, 0
+
+        claim_token = str(uuid.uuid4())
         execution.status = "RUNNING"
-        execution.started_at = datetime.now(UTC)
-        request = renderer.render(sample)
+        execution.claim_token = claim_token
+        execution.claim_expires_at = now + timedelta(seconds=claim_seconds)
+        execution.started_at = now
         execution.rendered_request_json = asdict(request)
         prior_attempts = (
             db.scalar(
@@ -140,21 +155,80 @@ async def _execute_sample(
             or 0
         )
         db.commit()
+        return "claimed", claim_token, prior_attempts
+
+
+def _stop_if_cancelled_or_reclaimed(execution_id: str, claim_token: str) -> bool:
+    with SessionLocal() as db:
+        execution = db.get(SampleExecution, execution_id)
+        if execution is None or execution.status in TERMINAL_SAMPLE_STATUSES:
+            return True
+        run_dataset = db.get(RunDataset, execution.run_dataset_id)
+        run = db.get(Run, run_dataset.run_id) if run_dataset else None
+        if run is not None and not run.cancel_requested and execution.claim_token == claim_token:
+            return False
+        if run is None or run.cancel_requested:
+            execution.status = "CANCELLED"
+            execution.claim_token = None
+            execution.claim_expires_at = None
+            execution.completed_at = datetime.now(UTC)
+            db.commit()
+        return True
+
+
+def _update_progress(run_dataset_id: str) -> None:
+    with SessionLocal() as db:
+        db.execute(
+            update(RunDataset)
+            .where(RunDataset.id == run_dataset_id)
+            .values(completed_samples=RunDataset.completed_samples + 1)
+        )
+        db.commit()
+
+
+async def _execute_sample(
+    *,
+    execution_id: str,
+    sample: EvalSample,
+    renderer: JinjaPromptRenderer,
+    adapter: OpenAICompatibleAdapter,
+    parser_config: dict[str, Any],
+    scorer_config: dict[str, Any],
+    endpoint_limiter: RedisEndpointLimiter,
+    semaphore: asyncio.Semaphore,
+    claim_seconds: float,
+) -> str:
+    request = renderer.render(sample)
+    claim_state, claim_token, prior_attempts = _claim_execution(
+        execution_id, request, claim_seconds
+    )
+    if claim_state != "claimed" or claim_token is None:
+        return claim_state
 
     async with semaphore:
-        await limiter.wait()
-        if _cancel_if_requested(execution_id):
-            return
-        inference = await adapter.infer(request)
+        if _stop_if_cancelled_or_reclaimed(execution_id, claim_token):
+            return "terminal"
+        async with endpoint_limiter.request_slot():
+            if _stop_if_cancelled_or_reclaimed(execution_id, claim_token):
+                return "terminal"
+            inference = await adapter.infer(request)
     parser = create_parser(parser_config)
     scorer = create_scorer(scorer_config)
     answer = parser.parse(sample, inference)
     score = scorer.score(sample, answer)
 
+    run_dataset_id: str | None = None
     with SessionLocal() as db:
-        execution = db.get(SampleExecution, execution_id)
+        execution = db.scalar(
+            select(SampleExecution)
+            .where(SampleExecution.id == execution_id)
+            .with_for_update()
+        )
         if execution is None:
-            return
+            return "terminal"
+        if execution.claim_token != claim_token:
+            return "busy"
+        run_dataset_id = execution.run_dataset_id
         execution.raw_response_json = (
             dict(inference.raw_response) if inference.raw_response else None
         )
@@ -168,6 +242,8 @@ async def _execute_sample(
         execution.error_type = inference.error_type
         execution.error_message_redacted = inference.error_message_redacted
         execution.completed_at = datetime.now(UTC)
+        execution.claim_token = None
+        execution.claim_expires_at = None
         if inference.error_type:
             execution.status = "API_ERROR"
         elif answer.status != "ok":
@@ -201,79 +277,67 @@ async def _execute_sample(
             )
         )
         db.commit()
-
-    with SessionLocal() as db:
-        run_dataset = db.get(RunDataset, execution.run_dataset_id)
-        if run_dataset:
-            run_dataset.completed_samples = (
-                db.scalar(
-                    select(func.count(SampleExecution.id)).where(
-                        SampleExecution.run_dataset_id == run_dataset.id,
-                        SampleExecution.status.in_(TERMINAL_SAMPLE_STATUSES),
-                    )
-                )
-                or 0
-            )
-            db.commit()
+    if run_dataset_id is not None:
+        _update_progress(run_dataset_id)
+    return "completed"
 
 
-def _records_for_aggregation(run_dataset_id: str) -> list[EvaluationRecord]:
-    with SessionLocal() as db:
-        executions = (
-            db.scalars(
-                select(SampleExecution)
-                .where(SampleExecution.run_dataset_id == run_dataset_id)
-                .options(selectinload(SampleExecution.scores))
-            )
-            .unique()
-            .all()
+def _records_for_aggregation(db: Session, run_dataset_id: str) -> list[EvaluationRecord]:
+    executions = (
+        db.scalars(
+            select(SampleExecution)
+            .where(SampleExecution.run_dataset_id == run_dataset_id)
+            .options(selectinload(SampleExecution.scores))
         )
-        records: list[EvaluationRecord] = []
-        for execution in executions:
-            score_row = execution.scores[-1] if execution.scores else None
-            request_data = execution.rendered_request_json or {
-                "request_id": execution.sample_id,
-                "model": "",
-                "mode": "chat_completions",
-                "messages": None,
-                "prompt": None,
-                "params": {},
-            }
-            records.append(
-                EvaluationRecord(
-                    sample=EvalSample(
-                        execution.sample_id,
-                        execution.inputs_json,
-                        execution.reference_json,
-                        execution.metadata_json,
-                    ),
-                    request=ModelRequest(**request_data),
-                    inference=InferenceResult(
-                        request_id=execution.sample_id,
-                        raw_response=execution.raw_response_json,
-                        output_text=execution.output_text,
-                        latency_ms=execution.latency_ms or 0,
-                        ttft_ms=execution.ttft_ms,
-                        prompt_tokens=execution.prompt_tokens,
-                        completion_tokens=execution.completion_tokens,
-                        error_type=execution.error_type,
-                        error_message_redacted=execution.error_message_redacted,
-                    ),
-                    answer=ParsedAnswer(
-                        execution.parsed_value_json,
-                        execution.parse_status or "upstream_error",
-                        "1",
-                    ),
-                    score=SampleScore(
-                        score_row.primary_score if score_row else None,
-                        score_row.metrics_json if score_row else {},
-                        score_row.passed if score_row else None,
-                        score_row.reason if score_row else None,
-                        score_row.scorer_version if score_row else "1",
-                    ),
-                )
+        .unique()
+        .all()
+    )
+    records: list[EvaluationRecord] = []
+    for execution in executions:
+        score_row = execution.scores[-1] if execution.scores else None
+        request_data = execution.rendered_request_json or {
+            "request_id": execution.sample_id,
+            "model": "",
+            "mode": "chat_completions",
+            "messages": None,
+            "prompt": None,
+            "params": {},
+        }
+        records.append(
+            EvaluationRecord(
+                sample=EvalSample(
+                    execution.sample_id,
+                    execution.inputs_json,
+                    execution.reference_json,
+                    execution.metadata_json,
+                ),
+                request=ModelRequest(**request_data),
+                inference=InferenceResult(
+                    request_id=execution.sample_id,
+                    raw_response=execution.raw_response_json,
+                    output_text=execution.output_text,
+                    latency_ms=execution.latency_ms or 0,
+                    ttft_ms=execution.ttft_ms,
+                    prompt_tokens=execution.prompt_tokens,
+                    completion_tokens=execution.completion_tokens,
+                    error_type=execution.error_type,
+                    error_message_redacted=execution.error_message_redacted,
+                ),
+                answer=ParsedAnswer(
+                    execution.parsed_value_json,
+                    execution.parse_status or "upstream_error",
+                    "1",
+                ),
+                score=SampleScore(
+                    score_row.primary_score if score_row else None,
+                    score_row.metrics_json if score_row else {},
+                    score_row.passed if score_row else None,
+                    score_row.reason if score_row else None,
+                    score_row.scorer_version if score_row else "1",
+                ),
             )
-        return records
+        )
+    return records
 
 
 def _group_value(record: EvaluationRecord, field: str) -> str:
@@ -284,7 +348,7 @@ def _group_value(record: EvaluationRecord, field: str) -> str:
 
 
 def _add_metric_rows(
-    db: Any,
+    db: Session,
     run_dataset_id: str,
     metrics: dict[str, Any],
     *,
@@ -308,29 +372,141 @@ def _add_metric_rows(
         )
 
 
-async def _execute_run_async(run_id: str) -> None:
+def _aggregate_dataset(db: Session, run: Run, run_dataset: RunDataset) -> None:
+    version = db.get(DatasetVersion, run_dataset.dataset_version_id)
+    if version is None:
+        raise RuntimeError("Frozen dataset version does not exist")
+    manifest = version.manifest_json
+    records = _records_for_aggregation(db, run_dataset.id)
+    protocol = manifest["protocol"]
+    aggregate_options = {
+        "denominator_policy": protocol.get("denominator_policy", "all_scoring_samples"),
+        "on_api_error": protocol.get("on_api_error", "exclude_and_report"),
+        "on_parse_error": protocol.get("on_parse_error", "count_as_incorrect"),
+        "labels": protocol["parser"].get("labels"),
+    }
+    metrics = aggregate_records(records, **aggregate_options)
+    db.execute(delete(RunMetric).where(RunMetric.run_dataset_id == run_dataset.id))
+    _add_metric_rows(db, run_dataset.id, metrics)
+    for group in manifest.get("groups", []):
+        field = group.get("field")
+        if not field:
+            continue
+        values = sorted({_group_value(record, field) for record in records})
+        for value in values:
+            group_records = [
+                record for record in records if _group_value(record, field) == value
+            ]
+            group_metrics = aggregate_records(group_records, **aggregate_options)
+            _add_metric_rows(
+                db,
+                run_dataset.id,
+                group_metrics,
+                group_key=field,
+                group_value=value,
+            )
+    run_dataset.completed_samples = len(records)
+    run_dataset.status = "CANCELLED" if run.cancel_requested else "SUCCEEDED"
+    run_dataset.counters_json = {
+        key: metrics[key]
+        for key in (
+            "total_samples",
+            "scored_samples",
+            "api_errors",
+            "parse_errors",
+            "score_errors",
+        )
+    }
+
+
+def _prepare_run(run_id: str) -> list[tuple[str, list[str]]]:
     with SessionLocal() as db:
         run = db.scalar(select(Run).where(Run.id == run_id).options(selectinload(Run.datasets)))
-        if run is None or run.status in {"SUCCEEDED", "CANCELLED"}:
-            return
+        if run is None or run.status in TERMINAL_RUN_STATUSES:
+            return []
         run.status = "PREPARING"
         run.started_at = run.started_at or datetime.now(UTC)
         run.completed_at = None
         run.error_message = None
+        work = []
+        for run_dataset in run.datasets:
+            run_dataset.status = "PREPARING"
+            version = db.get(DatasetVersion, run_dataset.dataset_version_id)
+            if version is None:
+                raise RuntimeError("Frozen dataset version does not exist")
+            work.append((run_dataset.id, run_dataset, version))
         db.commit()
-        spec = run.run_spec_json
+
+    for _, run_dataset, version in work:
+        _materialize(run_dataset, version)
+
+    with SessionLocal() as db:
+        run = db.get(Run, run_id)
+        if run is None or run.status in TERMINAL_RUN_STATUSES:
+            return []
+        run.status = "RUNNING"
+        shard_size = int(run.run_spec_json["execution"].get("shard_size", 50))
+        shards: list[tuple[str, list[str]]] = []
+        for run_dataset_id, _, _ in work:
+            run_dataset = db.get(RunDataset, run_dataset_id)
+            assert run_dataset is not None
+            run_dataset.status = "RUNNING"
+            execution_ids = list(
+                db.scalars(
+                    select(SampleExecution.id)
+                    .where(
+                        SampleExecution.run_dataset_id == run_dataset_id,
+                        SampleExecution.status.not_in(TERMINAL_SAMPLE_STATUSES),
+                    )
+                    .order_by(SampleExecution.sample_id)
+                )
+            )
+            shards.extend((run_dataset_id, chunk) for chunk in _chunks(execution_ids, shard_size))
+        db.commit()
+        return shards
+
+
+async def _execute_shard_async(
+    run_id: str,
+    run_dataset_id: str,
+    execution_ids: list[str],
+) -> dict[str, int]:
+    with SessionLocal() as db:
+        run = db.get(Run, run_id)
+        run_dataset = db.get(RunDataset, run_dataset_id)
+        if run is None or run_dataset is None or run.status in TERMINAL_RUN_STATUSES:
+            return {"completed": 0, "terminal": len(execution_ids), "busy": 0}
         revision = db.get(EndpointRevision, run.endpoint_revision_id)
-        if revision is None:
-            raise RuntimeError("Frozen endpoint revision does not exist")
+        version = db.get(DatasetVersion, run_dataset.dataset_version_id)
+        if revision is None or version is None:
+            raise RuntimeError("Frozen run resources do not exist")
+        spec = run.run_spec_json
+        executions = list(
+            db.scalars(select(SampleExecution).where(SampleExecution.id.in_(execution_ids)))
+        )
+        samples = {
+            execution.id: EvalSample(
+                execution.sample_id,
+                execution.inputs_json,
+                execution.reference_json,
+                execution.metadata_json,
+            )
+            for execution in executions
+        }
+        manifest = version.manifest_json
         secret = SecretCipher().decrypt(revision.secret_ciphertext)
         headers = {
             **auth_headers(revision.config_json["auth_type"], secret),
             **revision.config_json.get("extra_headers", {}),
         }
-        run_dataset_ids = [item.id for item in run.datasets]
 
     execution_config = spec["execution"]
-    inference_overrides = spec["inference"]
+    request_spec = dict(manifest["request"])
+    request_spec["parameters"] = {
+        **request_spec.get("parameters", {}),
+        **{key: value for key, value in spec["inference"].items() if value is not None},
+    }
+    renderer = JinjaPromptRenderer(request_spec, spec["model_name"])
     adapter = OpenAICompatibleAdapter(
         base_url=revision.config_json["base_url"],
         headers=headers,
@@ -338,151 +514,112 @@ async def _execute_run_async(run_id: str) -> None:
         max_retries=execution_config["max_retries"],
     )
     semaphore = asyncio.Semaphore(execution_config["effective_concurrency"])
-    limiter = AsyncRateLimiter(min(execution_config["qps"], revision.config_json["qps_limit"]))
-
-    async with adapter:
-        for run_dataset_id in run_dataset_ids:
-            with SessionLocal() as db:
-                run_dataset = db.get(RunDataset, run_dataset_id)
-                assert run_dataset is not None
-                version = db.get(DatasetVersion, run_dataset.dataset_version_id)
-                assert version is not None
-                run_dataset.status = "PREPARING"
-                db.commit()
-            samples = _materialize(run_dataset, version)
-            manifest = version.manifest_json
-            request_spec = dict(manifest["request"])
-            request_spec["parameters"] = {
-                **request_spec.get("parameters", {}),
-                **{key: value for key, value in inference_overrides.items() if value is not None},
-            }
-            renderer = JinjaPromptRenderer(request_spec, spec["model_name"])
-            with SessionLocal() as db:
-                run_dataset = db.get(RunDataset, run_dataset_id)
-                run_dataset.status = "RUNNING"
-                run = db.get(Run, run_id)
-                run.status = "RUNNING"
-                executions = db.scalars(
-                    select(SampleExecution).where(
-                        SampleExecution.run_dataset_id == run_dataset_id,
-                        SampleExecution.status.not_in(TERMINAL_SAMPLE_STATUSES),
-                    )
-                ).all()
-                execution_pairs = [
-                    (execution.id, samples[execution.sample_id]) for execution in executions
-                ]
-                db.commit()
-            await asyncio.gather(
-                *[
-                    _execute_sample(
-                        execution_id=execution_id,
-                        sample=sample,
-                        renderer=renderer,
-                        adapter=adapter,
-                        parser_config=manifest["protocol"]["parser"],
-                        scorer_config=manifest["protocol"]["scorer"],
-                        limiter=limiter,
-                        semaphore=semaphore,
-                    )
-                    for execution_id, sample in execution_pairs
-                ]
-            )
-            records = _records_for_aggregation(run_dataset_id)
-            protocol = manifest["protocol"]
-            labels = protocol["parser"].get("labels")
-            aggregate_options = {
-                "denominator_policy": protocol.get("denominator_policy", "all_scoring_samples"),
-                "on_api_error": protocol.get("on_api_error", "exclude_and_report"),
-                "on_parse_error": protocol.get("on_parse_error", "count_as_incorrect"),
-                "labels": labels,
-            }
-            metrics = aggregate_records(
-                records,
-                **aggregate_options,
-            )
-            grouped_metrics: list[tuple[str, str, dict[str, Any]]] = []
-            for group in manifest.get("groups", []):
-                field = group.get("field")
-                if not field:
-                    continue
-                values = sorted({_group_value(record, field) for record in records})
-                for value in values:
-                    group_records = [
-                        record for record in records if _group_value(record, field) == value
-                    ]
-                    grouped_metrics.append(
-                        (
-                            field,
-                            value,
-                            aggregate_records(group_records, **aggregate_options),
-                        )
-                    )
-            with SessionLocal() as db:
-                db.execute(delete(RunMetric).where(RunMetric.run_dataset_id == run_dataset_id))
-                _add_metric_rows(db, run_dataset_id, metrics)
-                for group_key, group_value, group_metrics in grouped_metrics:
-                    _add_metric_rows(
-                        db,
-                        run_dataset_id,
-                        group_metrics,
-                        group_key=group_key,
-                        group_value=group_value,
-                    )
-                run_dataset = db.get(RunDataset, run_dataset_id)
-                run = db.get(Run, run_id)
-                assert run_dataset is not None and run is not None
-                run_dataset.completed_samples = (
-                    db.scalar(
-                        select(func.count(SampleExecution.id)).where(
-                            SampleExecution.run_dataset_id == run_dataset.id,
-                            SampleExecution.status.in_(TERMINAL_SAMPLE_STATUSES),
-                        )
-                    )
-                    or 0
+    settings = get_settings()
+    limiter = RedisEndpointLimiter(
+        redis_url=settings.redis_url,
+        endpoint_revision_id=revision.id,
+        qps=min(execution_config["qps"], revision.config_json["qps_limit"]),
+        concurrency_limit=int(
+            revision.config_json.get("concurrency_limit", settings.default_concurrency)
+        ),
+        lease_seconds=_claim_seconds(execution_config),
+        run_id=run_id,
+        run_concurrency_limit=int(execution_config["effective_concurrency"]),
+    )
+    async with adapter, limiter:
+        states = await asyncio.gather(
+            *[
+                _execute_sample(
+                    execution_id=execution_id,
+                    sample=samples[execution_id],
+                    renderer=renderer,
+                    adapter=adapter,
+                    parser_config=manifest["protocol"]["parser"],
+                    scorer_config=manifest["protocol"]["scorer"],
+                    endpoint_limiter=limiter,
+                    semaphore=semaphore,
+                    claim_seconds=_claim_seconds(execution_config),
                 )
-                if run.cancel_requested:
-                    run_dataset.status = "CANCELLED"
-                else:
-                    run_dataset.status = "SUCCEEDED"
-                run_dataset.counters_json = {
-                    key: metrics[key]
-                    for key in (
-                        "total_samples",
-                        "scored_samples",
-                        "api_errors",
-                        "parse_errors",
-                        "score_errors",
-                    )
-                }
-                db.commit()
+                for execution_id in execution_ids
+                if execution_id in samples
+            ]
+        )
+    return {state: states.count(state) for state in ("completed", "terminal", "busy")}
 
-    with SessionLocal() as db:
-        run = db.get(Run, run_id)
-        assert run is not None
+
+def _finalize_run(run_id: str) -> None:
+    with SessionLocal() as db, db.begin():
+        run = db.scalar(
+            select(Run)
+            .where(Run.id == run_id)
+            .options(selectinload(Run.datasets))
+            .with_for_update()
+        )
+        if run is None or run.status in TERMINAL_RUN_STATUSES:
+            return
+        nonterminal = db.scalar(
+            select(func.count(SampleExecution.id))
+            .join(RunDataset)
+            .where(
+                RunDataset.run_id == run_id,
+                SampleExecution.status.not_in(TERMINAL_SAMPLE_STATUSES),
+            )
+        )
+        if nonterminal:
+            raise RunNotReady(f"{nonterminal} samples are not terminal")
+        for run_dataset in run.datasets:
+            _aggregate_dataset(db, run, run_dataset)
         run.status = "CANCELLED" if run.cancel_requested else "SUCCEEDED"
         run.completed_at = datetime.now(UTC)
-        db.commit()
+
+
+@celery_app.task(bind=True, name="workers.tasks.run_eval.execute_shard", acks_late=True)
+def execute_shard(
+    self,
+    run_id: str,
+    run_dataset_id: str,
+    execution_ids: list[str],
+) -> dict[str, int]:
+    try:
+        result = asyncio.run(_execute_shard_async(run_id, run_dataset_id, execution_ids))
+    except Exception as exc:
+        if self.request.retries < 3:
+            raise self.retry(exc=exc, countdown=2**self.request.retries, max_retries=3) from exc
+        _mark_run_failed(run_id, exc)
+        raise
+    if result["busy"]:
+        raise self.retry(countdown=1, max_retries=600)
+    return result
+
+
+@celery_app.task(bind=True, name="workers.tasks.run_eval.finalize_run", acks_late=True)
+def finalize_run(self, _: list[dict[str, int]], run_id: str) -> None:
+    try:
+        _finalize_run(run_id)
+    except RunNotReady as exc:
+        raise self.retry(exc=exc, countdown=1, max_retries=600) from exc
+    except Exception as exc:
+        _mark_run_failed(run_id, exc)
+        raise
 
 
 @celery_app.task(bind=True, name="workers.tasks.run_eval.execute_run", acks_late=True)
-def execute_run(self, run_id: str) -> None:
+def execute_run(self, run_id: str) -> dict[str, int]:
     del self
     try:
-        asyncio.run(_execute_run_async(run_id))
+        shards = _prepare_run(run_id)
+        if not shards:
+            with SessionLocal() as db:
+                run = db.get(Run, run_id)
+                if run is not None and run.status not in TERMINAL_RUN_STATUSES:
+                    finalize_run.apply_async(args=[[], run_id], queue="native")
+            return {"shards": 0}
+        header = [
+            execute_shard.s(run_id, run_dataset_id, execution_ids).set(queue="native")
+            for run_dataset_id, execution_ids in shards
+        ]
+        chord(header)(finalize_run.s(run_id).set(queue="native"))
+        return {"shards": len(shards)}
     except Exception as exc:
-        logger.exception("Run failed run_id=%s", run_id)
-        with SessionLocal() as db:
-            run = db.get(Run, run_id)
-            if run:
-                run.status = "FAILED"
-                run.error_message = f"{type(exc).__name__}: {str(exc)[:500]}"
-                run.completed_at = datetime.now(UTC)
-                for run_dataset in db.scalars(
-                    select(RunDataset).where(
-                        RunDataset.run_id == run_id,
-                        RunDataset.status.not_in({"SUCCEEDED", "CANCELLED"}),
-                    )
-                ):
-                    run_dataset.status = "FAILED"
-                db.commit()
+        _mark_run_failed(run_id, exc)
         raise
