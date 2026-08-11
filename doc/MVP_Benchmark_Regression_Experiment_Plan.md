@@ -25,6 +25,7 @@
 | P1-06 Shared QPS | DONE | QPS 10/50 合并滑窗峰值 11/49；两组各 200 请求且两个 run 均完成 |
 | P1-07/P1-08 Fault + retry | DONE | 初始 210 attempts；35 transient 仅重试一次；最终 245 attempts，指标完全匹配 |
 | P1-09 Cancel | DONE | completed=52 时取消；67 succeeded/933 cancelled；取消后新增请求 0；导出 1,000 行 |
+| P1-09 实现检查点 | DONE | commit `fefe516`（代码、冻结 fixtures、migration、实验运行器与回归测试） |
 | P1-10 Worker crash | NOT STARTED | 下一项：运行中杀死 worker，验证 claim expiry、redelivery 和唯一 score revision |
 | 当前回归/部署 | DONE | 50 unit/contract + 6 integration；Ruff/ESLint/build 通过；Compose healthy；主库 head `0002` |
 | P1-11 至 P1-13 | NOT STARTED | 按实验矩阵继续执行 |
@@ -50,6 +51,7 @@
 | 2026-08-11 | 执行 P1-07/P1-08；首轮 50ms timeout 混入 mock 调度抖动，调整为 150ms/并发 4 后重跑 | P1-07：120 样本、210 attempts、95 API/15 parse、accuracy 0.4；P1-08：仅 35 transient 重跑，245 attempts、accuracy 0.75；证据 `artifacts/experiments/P1-07-08-fault-retry-20260811T102324Z/` |
 | 2026-08-11 | 执行 P1-09 取消实验，mock 统一延迟 100ms | completed=52 时取消；最终 67 succeeded + 933 cancelled = 1,000；取消后新增请求 0；导出 1,000 行；证据 `artifacts/experiments/P1-09-cancel-20260811T102548Z/` |
 | 2026-08-11 | 本轮全量回归并重建运行栈 | unit/contract `50 passed`；integration `6 passed`；Ruff、ESLint、Vite build 通过；所有 `zihao` 服务在线，API healthy，主数据库 migration head `20260811_0002` |
+| 2026-08-11 | 固化 P1-09 实现检查点 | commit `fefe516`；未提交 `artifacts/`、`hf_cache/`、环境文件、构建目录或密钥 |
 
 ## 1. 实验目标
 
