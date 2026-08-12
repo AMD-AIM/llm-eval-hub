@@ -8,7 +8,7 @@
 
 ## 0. 实时执行状态
 
-> 最后更新：2026-08-12 10:08 CST
+> 最后更新：2026-08-12 10:09 CST
 
 | 项目 | 状态 | 当前证据/结果 |
 |---|---|---|
@@ -27,6 +27,7 @@
 | P1-09 Cancel | DONE | completed=52 时取消；67 succeeded/933 cancelled；取消后新增请求 0；导出 1,000 行 |
 | P1-09 实现检查点 | DONE | commit `fefe516`（代码、冻结 fixtures、migration、实验运行器与回归测试） |
 | P1-10 Worker crash | DONE | completed=50/active claims=150 时 SIGKILL，exit 137；最终 1,000 execution/score/attempt，revision 仅 1，claims=0，进度单调 |
+| P1-10 实现检查点 | DONE | commit `579b02e`（真实容器故障编排、独立实验控制器、证据和恢复清理） |
 | 当前回归/部署 | DONE | P1-10 专项 PASS；50 unit/contract + 6 integration；Ruff/ESLint/build 通过；Compose healthy；主库 head `0002` |
 | P1-11 至 P1-13 | NOT STARTED | 下一项 P1-11：全服务重启、pg_dump/restore 与 checksum 核对 |
 | B2/R2 Phase 2 | NOT STARTED | 必须先通过 Phase 1 退出门 |
@@ -56,6 +57,7 @@
 | 2026-08-12 | P1-10 首轮 setup 未进入故障注入 | test 镜像不含 `docker-compose.yml`，配置 hash 读取失败；自动恢复主 worker、删除临时库与状态，改由宿主传入 hash 后从零重跑 |
 | 2026-08-12 | 完成 P1-10 Worker crash 正式实验 | completed=50、active claims=150 时 SIGKILL，exit 137；杀死后仍有 120 claims；恢复后 1,000 样本/score/attempt、revision `[1]`、claims=0、进度单调、accuracy `1.0`；at-least-once 产生 16 个重复 HTTP 请求但无重复计分；证据 `artifacts/experiments/P1-10-worker-crash-20260812T020425Z/` |
 | 2026-08-12 | P1-10 后全量回归和主栈重建 | unit/contract `50 passed`；integration `6 passed`；Ruff、ESLint、Vite build 通过；API/mock/Web healthy，主库 head `20260811_0002`；临时库与 Redis DB 14 已清理 |
+| 2026-08-12 | 固化 P1-10 实现检查点 | commit `579b02e`；证据、HF 缓存、环境文件和密钥未纳入提交 |
 
 ## 1. 实验目标
 
