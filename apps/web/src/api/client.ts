@@ -6,10 +6,31 @@ export class ApiError extends Error {
   detail: unknown;
 
   constructor(status: number, detail: unknown) {
-    super(typeof detail === "string" ? detail : `API request failed (${status})`);
+    super(apiErrorMessage(status, detail));
     this.status = status;
     this.detail = detail;
   }
+}
+
+function apiErrorMessage(status: number, detail: unknown): string {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (!detail || typeof detail !== "object") return `API request failed (${status})`;
+
+  const response = detail as Record<string, unknown>;
+  const payload = response.detail ?? response.error ?? response;
+  if (typeof payload === "string") return payload;
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const structured = payload as Record<string, unknown>;
+    if (typeof structured.message === "string") return structured.message;
+    if (typeof structured.code === "string") return structured.code;
+  }
+  if (Array.isArray(payload) && payload.length > 0) {
+    const first = payload[0];
+    if (first && typeof first === "object" && typeof (first as Record<string, unknown>).msg === "string") {
+      return (first as Record<string, string>).msg;
+    }
+  }
+  return `API request failed (${status})`;
 }
 
 export function getApiKey(): string {

@@ -27,7 +27,7 @@ x-backend: &backend
     HUGGINGFACE_HUB_CACHE: /workspace/hf_cache/hub
     ADMIN_API_KEY: ${ADMIN_API_KEY:-zihao-local-dev-key}
     SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:-}
-    ALLOWED_ENDPOINT_HOSTS: ${ALLOWED_ENDPOINT_HOSTS:-mock-openai,host.docker.internal}
+    ALLOWED_ENDPOINT_HOSTS: ${ALLOWED_ENDPOINT_HOSTS:-mock-openai,host.docker.internal,developer.amd.com.cn}
     ALLOWED_ENDPOINT_CIDRS: ${ALLOWED_ENDPOINT_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
     ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:-true}
     WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:18080}

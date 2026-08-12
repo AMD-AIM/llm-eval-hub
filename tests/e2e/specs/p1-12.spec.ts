@@ -148,15 +148,15 @@ test.describe("P1-12 Browser E2E", () => {
       await page.locator(".page-heading").getByRole("button", { name: "登记 Endpoint" }).click();
       const dialog = page.getByRole("dialog", { name: "登记 Endpoint" });
       await dialog.getByLabel("名称").fill(endpointName);
+      await dialog.getByLabel("认证方式").selectOption("none");
       await dialog.getByLabel("Base URL").fill("http://e2e-mock-openai:8001/v1");
+      await dialog.getByLabel("Model ID").fill("mock-intent-v1");
       await dialog.getByLabel("并发上限").fill("4");
       await dialog.getByLabel("QPS 上限").fill("100");
       await dialog.getByRole("button", { name: "保存" }).click();
       const row = page.getByRole("row").filter({ hasText: endpointName });
       await expect(row).toBeVisible();
-      await row.getByTitle("执行能力探测").click();
       await expect(row.getByText("healthy", { exact: true })).toBeVisible();
-      await row.getByRole("button", { name: endpointName }).click();
       await expect(page.locator(".model-list span").filter({ hasText: "mock-intent-v1" })).toBeVisible();
       await assertLayout(page, "desktop endpoint");
       await saveScreenshot(page, "desktop-01-endpoint.png");

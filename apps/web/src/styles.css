@@ -142,6 +142,7 @@ input:focus, select:focus, textarea:focus { border-color: #3b8f83; box-shadow: 0
 .cap-off { color: #7b8480; background: #eef0ef; }
 .detail-drawer { padding: 0 18px 18px; background: #fafcfa; border-top: 1px solid var(--line); }
 .detail-drawer .section-heading { padding-inline: 0; }
+.endpoint-probe-error { margin-top: 12px; }
 .model-list { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 12px; }
 .model-list > span { min-height: 35px; padding: 7px 10px; display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid var(--line); border-radius: 4px; font-family: monospace; font-size: 10px; }
 .model-list small { color: var(--muted); font-family: inherit; }
@@ -295,4 +296,3 @@ pre { margin: 0; padding: 16px 18px; overflow: auto; color: #35423c; background:
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation-duration: 0.01ms !important; }
 }
-

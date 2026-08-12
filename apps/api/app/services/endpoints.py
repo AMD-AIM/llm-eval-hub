@@ -33,6 +33,7 @@ async def probe_openai_endpoint(
     extra_headers: dict[str, str],
     requested_model: str | None,
     timeout_seconds: float = 15,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, Any]:
     headers = {**auth_headers(auth_type, api_key), **sanitized_extra_headers(extra_headers)}
     models: list[str] = []
@@ -42,6 +43,7 @@ async def probe_openai_endpoint(
         headers=headers,
         timeout=timeout_seconds,
         follow_redirects=False,
+        transport=transport,
     ) as client:
         try:
             response = await client.get(f"{base_url}/models")

@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class EndpointCreate(BaseModel):
     name: str = Field(min_length=2, max_length=128)
     base_url: str = Field(min_length=8, max_length=2048)
+    model_name: str | None = Field(default=None, min_length=1, max_length=512)
     auth_type: Literal["bearer", "api-key-header", "none"] = "bearer"
     api_key: str | None = Field(default=None, max_length=8192)
     extra_headers: dict[str, str] = Field(default_factory=dict)

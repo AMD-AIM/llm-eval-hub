@@ -97,6 +97,15 @@ async def create_endpoint(
     db.add(revision)
     db.flush()
     endpoint.active_revision_id = revision.id
+    if payload.model_name:
+        db.add(
+            Model(
+                endpoint_id=endpoint.id,
+                model_name=payload.model_name,
+                display_name=payload.model_name,
+                source="manual",
+            )
+        )
     record_audit(
         db,
         actor=actor.username,
@@ -194,12 +203,18 @@ async def probe_endpoint(
         raise HTTPException(status_code=404, detail={"code": "ENDPOINT_NOT_FOUND"})
     revision = _active_revision(db, endpoint)
     await validate_endpoint_url(endpoint.base_url, settings)
+    requested_model = payload.model_id or db.scalar(
+        select(Model.model_name)
+        .where(Model.endpoint_id == endpoint.id, Model.enabled.is_(True))
+        .order_by(Model.model_name)
+        .limit(1)
+    )
     result = await probe_openai_endpoint(
         base_url=endpoint.base_url,
         auth_type=endpoint.auth_type,
         api_key=SecretCipher().decrypt(revision.secret_ciphertext),
         extra_headers=revision.config_json.get("extra_headers", {}),
-        requested_model=payload.model_id,
+        requested_model=requested_model,
     )
     capability = EndpointCapability(
         revision_id=revision.id,
