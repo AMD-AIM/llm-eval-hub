@@ -1,5 +1,11 @@
 name: zihao-llm-eval-hub
 
+x-gpu-boundary: &gpu-boundary
+  ROCR_VISIBLE_DEVICES: ${EVALHUB_GPU_DEVICES:-2,3}
+  HIP_VISIBLE_DEVICES: ${EVALHUB_GPU_DEVICES:-2,3}
+  CUDA_VISIBLE_DEVICES: ${EVALHUB_GPU_DEVICES:-2,3}
+  GPU_DEVICE_ORDINAL: ${EVALHUB_GPU_DEVICES:-2,3}
+
 x-backend: &backend
   build:
     context: .
@@ -9,6 +15,7 @@ x-backend: &backend
     - path: .env
       required: false
   environment:
+    <<: *gpu-boundary
     DATABASE_URL: postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/evalhub
     REDIS_URL: redis://redis:6379/0
     CELERY_BROKER_URL: redis://redis:6379/1
@@ -108,6 +115,7 @@ services:
     container_name: zihao-evalhub-integration-tests
     command: pytest -m integration
     environment:
+      <<: *gpu-boundary
       EVALHUB_TEST_DATABASE_SERVER_URL: >-
         postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/postgres
       EVALHUB_TEST_REDIS_URL: redis://redis:6379/15
@@ -132,6 +140,7 @@ services:
     container_name: zihao-evalhub-capacity-experiment
     command: python -m tests.experiments.run_capacity
     environment:
+      <<: *gpu-boundary
       EVALHUB_TEST_DATABASE_SERVER_URL: >-
         postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/postgres
       EVALHUB_TEST_REDIS_URL: redis://redis:6379/15
@@ -159,6 +168,7 @@ services:
     container_name: zihao-evalhub-qps-experiment
     command: python -m tests.experiments.run_shared_qps
     environment:
+      <<: *gpu-boundary
       EVALHUB_TEST_DATABASE_SERVER_URL: >-
         postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/postgres
       EVALHUB_TEST_REDIS_URL: redis://redis:6379/15
@@ -186,6 +196,7 @@ services:
     container_name: zihao-evalhub-faults-experiment
     command: python -m tests.experiments.run_faults_retry
     environment:
+      <<: *gpu-boundary
       EVALHUB_TEST_DATABASE_SERVER_URL: >-
         postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/postgres
       EVALHUB_TEST_REDIS_URL: redis://redis:6379/15
@@ -213,6 +224,7 @@ services:
     container_name: zihao-evalhub-cancel-experiment
     command: python -m tests.experiments.run_cancel
     environment:
+      <<: *gpu-boundary
       EVALHUB_TEST_DATABASE_SERVER_URL: >-
         postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/postgres
       EVALHUB_TEST_REDIS_URL: redis://redis:6379/15
@@ -240,6 +252,7 @@ services:
     container_name: zihao-evalhub-crash-experiment
     command: python -m tests.experiments.run_worker_crash
     environment:
+      <<: *gpu-boundary
       EVALHUB_TEST_DATABASE_SERVER_URL: >-
         postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/postgres
       EVALHUB_TEST_MOCK_BASE_URL: http://mock-openai:8001/v1
@@ -261,6 +274,32 @@ services:
         condition: service_healthy
       mock-openai:
         condition: service_started
+    profiles: [experiment]
+
+  restart-restore-experiment:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: test
+    container_name: zihao-evalhub-restart-restore-experiment
+    command: python -m tests.experiments.run_restart_restore
+    environment:
+      <<: *gpu-boundary
+      EVALHUB_TEST_DATABASE_SERVER_URL: >-
+        postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/postgres
+      EVALHUB_RESTORE_DATABASE_NAME: evalhub_p1_11_restore
+      EVALHUB_GIT_SHA: ${EVALHUB_GIT_SHA:-working-tree}
+      EVALHUB_COMPOSE_CONFIG_SHA256: ${EVALHUB_COMPOSE_CONFIG_SHA256:-working-tree}
+      EVALHUB_GPU_DEVICES: ${EVALHUB_GPU_DEVICES:-2,3}
+      EVALHUB_GPU_UNIQUE_IDS: ${EVALHUB_GPU_UNIQUE_IDS:-unknown,unknown}
+      APP_ENV: test
+      DATABASE_URL: >-
+        postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/evalhub
+    volumes:
+      - ./artifacts:/workspace/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
     profiles: [experiment]
 
   web:

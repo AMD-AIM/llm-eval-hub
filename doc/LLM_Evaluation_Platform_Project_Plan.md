@@ -3,12 +3,12 @@
 > 文档状态：可用于立项、架构评审与 MVP 开发拆解  
 > 建议项目代号：`LLM Eval Hub`  
 > 版本：v0.1  
-> 更新日期：2026-08-11
+> 更新日期：2026-08-12
 
 ## 0. 实施状态（持续更新）
 
 > 开始实施：2026-08-11  
-> 当前阶段：Phase 1 / 首个可用闭环已跑通，进入可靠性与容量加固  
+> 当前阶段：Phase 1 / P1-01 至 P1-11 已通过，进入 Browser E2E 与安全收口
 > 工作目录：`/home/zihaomu/bigssd_workspace/model_benchmark`（与 `/dc2/zihaomu/workspace/model_benchmark` 为同一目录）
 
 ### 0.1 当前进度
@@ -18,6 +18,7 @@
 - [x] 建立 Python 3.12、React、Docker Compose 基础配置。
 - [x] 固定 Hugging Face 缓存到项目内 `hf_cache/`，禁止落到用户级默认缓存。
 - [x] Compose 项目、容器和持久卷统一使用 `zihao` 归属前缀。
+- [x] GPU 资源限制为本机后两张 AMD 卡（物理卡 `2,3`），CPU-only 服务不挂载 GPU 设备。
 - [x] 完成 dataset schema、fingerprint、parser/scorer/aggregator 与 golden tests。
 - [x] 完成 FastAPI、16 张 PostgreSQL 核心表、Alembic、Endpoint/Dataset/Run API。
 - [x] 完成 Celery worker、OpenAI adapter、mock server 与异步评测链路。
@@ -25,6 +26,7 @@
 - [x] 完成 transient failure 定向重试、attempt 保留和断点幂等跳过。
 - [x] 完成 Compose 构建启动和 12 样本首个 vertical slice 端到端验收。
 - [x] 将 Phase 1/2 细化为可执行的 MVP、Benchmark 与回归能力实验计划。
+- [x] 完成容量、共享 QPS、故障重试、取消、worker crash 和 PostgreSQL 双次恢复实验。
 - [ ] 完成第 18 节的 1,000 样本容量、worker crash、取消和备份恢复等完整 MVP 验收。
 
 ### 0.2 原型阶段临时决策
@@ -36,6 +38,7 @@
 3. Endpoint 默认只允许配置的私网 CIDR 和域名；开发环境显式允许 mock 服务与 `host.docker.internal`。
 4. 默认 endpoint 并发为 8、QPS 为 10，全局并发上限为 32。
 5. 前端/API/Mock 宿主端口分别为 `18080`、`18000`、`18001`，避免占用机器现有服务端口。
+6. 本机 GPU 只允许使用物理卡 `2,3`；统一设置 ROCm/HIP/CUDA 可见设备变量，物理卡 `0,1` 禁止使用。
 
 ### 0.3 实施日志
 
@@ -49,6 +52,8 @@
 | 2026-08-11 | 在 Compose 内使用 mock OpenAI 完成 12 样本 E2E | 12/12 完成；accuracy/macro/micro F1 = `1.0`；API/parse error = `0`；分组指标落库；CSV 13 行 |
 | 2026-08-11 | 完成当前自动化回归 | `pytest`: 31 passed；`ruff`: passed |
 | 2026-08-11 | 细化 Phase 1/2 的实验矩阵、Benchmark 能力边界、paired regression、quality gate 和退出门 | 见 [`MVP_Benchmark_Regression_Experiment_Plan.md`](./MVP_Benchmark_Regression_Experiment_Plan.md) |
+| 2026-08-12 | 完成 P1-01 至 P1-11，加入后两卡资源硬约束 | 容量/QPS/故障/取消/worker crash/备份恢复通过；API/worker 仅暴露 GPU `2,3`，P1-11 未挂载 GPU 设备 |
+| 2026-08-12 | 完成 P1-11 后全量回归 | unit/contract `50 passed`；integration `6 passed`；Ruff、ESLint、Vite build 和主 Compose 健康检查通过 |
 
 ### 0.4 当前运行入口
 
@@ -60,12 +65,10 @@
 
 ### 0.5 Phase 1 剩余工作
 
-1. 将当前 run 内存级 async semaphore/QPS limiter 升级为 Redis 上的 endpoint 级共享 semaphore 与 token bucket，覆盖多 run、多 worker 争用。
-2. 将单个 run Celery task 扩展为固定大小 shard、公平调度和 revoke 协作；当前已支持 ack-late、terminal sample 幂等跳过和取消前二次检查。
-3. 自动化 FastAPI + PostgreSQL + Redis + Celery 集成/E2E 测试，并执行 1,000 样本并发 32、worker crash/restart、取消和重复消息演练。
-4. 完成 PostgreSQL 备份恢复演练、数据保留清理和生产 secret/Vault/KMS 接入。
-5. 企业 OIDC 与 admin/maintainer/viewer RBAC 尚未接入；当前仅提供内部原型用管理员 API Key。
-6. 前端生产包中 ECharts 主 chunk 约 1.46 MB（gzip 约 484 KB），功能不受影响，后续应按路由和图表模块拆包。
+1. 完成 Playwright 浏览器主流程、SSE 刷新恢复、筛选与 CSV/JSONL 导出验收（P1-12）。
+2. 完成 secret/log/Celery payload 扫描和 SSRF 拒绝矩阵（P1-13）。
+3. 完成数据保留清理和生产 secret/Vault/KMS 接入；OIDC/RBAC 按 Phase 2 计划实施。
+4. 前端生产包中 ECharts 主 chunk 约 1.46 MB（gzip 约 484 KB），功能不受影响，后续应按路由和图表模块拆包。
 
 ## 1. 项目背景
 

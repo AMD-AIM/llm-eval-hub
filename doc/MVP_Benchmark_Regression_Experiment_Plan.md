@@ -4,11 +4,11 @@
 > 编写日期：2026-08-11  
 > 适用范围：Phase 1 MVP 收口、Phase 2 标准 Benchmark 与回归能力  
 > 执行目录：`/home/zihaomu/bigssd_workspace/model_benchmark`  
-> 状态：执行中（Phase 1 / P1-11 待执行）
+> 状态：执行中（Phase 1 / P1-12 Browser E2E 待执行）
 
 ## 0. 实时执行状态
 
-> 最后更新：2026-08-12 10:09 CST
+> 最后更新：2026-08-12 10:53 CST
 
 | 项目 | 状态 | 当前证据/结果 |
 |---|---|---|
@@ -28,8 +28,10 @@
 | P1-09 实现检查点 | DONE | commit `fefe516`（代码、冻结 fixtures、migration、实验运行器与回归测试） |
 | P1-10 Worker crash | DONE | completed=50/active claims=150 时 SIGKILL，exit 137；最终 1,000 execution/score/attempt，revision 仅 1，claims=0，进度单调 |
 | P1-10 实现检查点 | DONE | commit `579b02e`（真实容器故障编排、独立实验控制器、证据和恢复清理） |
-| 当前回归/部署 | DONE | P1-10 专项 PASS；50 unit/contract + 6 integration；Ruff/ESLint/build 通过；Compose healthy；主库 head `0002` |
-| P1-11 至 P1-13 | NOT STARTED | 下一项 P1-11：全服务重启、pg_dump/restore 与 checksum 核对 |
+| GPU 资源边界 | DONE | 本机 4× AMD Radeon AI PRO R9700；后续仅允许物理卡 `2,3`，P1-11 不挂载 GPU 设备、实际 GPU 使用为 0 |
+| P1-11 Restart/restore | DONE | 6 服务完成 restart；17 张 public 表两次 clean restore checksum 一致；backup 57,645 bytes、权限 0600 |
+| 当前回归/部署 | DONE | P1-11 专项 PASS；50 unit/contract + 6 integration；Ruff/ESLint/build 通过；Compose healthy；主库 head `0002` |
+| P1-12 至 P1-13 | NOT STARTED | 下一项 P1-12 Browser E2E |
 | B2/R2 Phase 2 | NOT STARTED | 必须先通过 Phase 1 退出门 |
 
 状态枚举：`NOT STARTED`、`IN PROGRESS`、`BLOCKED`、`DONE`。只有实验断言和证据落盘后才能标记 `DONE`。
@@ -58,6 +60,10 @@
 | 2026-08-12 | 完成 P1-10 Worker crash 正式实验 | completed=50、active claims=150 时 SIGKILL，exit 137；杀死后仍有 120 claims；恢复后 1,000 样本/score/attempt、revision `[1]`、claims=0、进度单调、accuracy `1.0`；at-least-once 产生 16 个重复 HTTP 请求但无重复计分；证据 `artifacts/experiments/P1-10-worker-crash-20260812T020425Z/` |
 | 2026-08-12 | P1-10 后全量回归和主栈重建 | unit/contract `50 passed`；integration `6 passed`；Ruff、ESLint、Vite build 通过；API/mock/Web healthy，主库 head `20260811_0002`；临时库与 Redis DB 14 已清理 |
 | 2026-08-12 | 固化 P1-10 实现检查点 | commit `579b02e`；证据、HF 缓存、环境文件和密钥未纳入提交 |
+| 2026-08-12 | 插入后两卡资源约束并启动 P1-11 | 识别 4× AMD Radeon AI PRO R9700；仅允许物理卡 `2,3`（Unique ID `0x70f6f122856c649c`、`0x1ee7dc67425b7684`）；P1-11 为 CPU/存储实验且不映射 GPU 设备 |
+| 2026-08-12 | 完成 P1-11 实验编排 | 新增 6 服务 restart 生命周期证据、17 张 public 表 schema/data 规范化 SHA-256、custom-format pg_dump、隔离库双次 drop/create/restore 和失败自动清理；Ruff、shell syntax、Compose config 通过 |
+| 2026-08-12 | 完成 P1-11 正式实验 | 6 服务均原容器重启且健康，主库重启前后 checksum 不变；backup 57,645 bytes、mode `0600`、SHA-256 `5001ac...3b9c`；两次 clean restore 均匹配源库 `399a4d...ccc3`，head `0002`；恢复库已删除；证据 `artifacts/experiments/P1-11-restart-restore-20260812T024953Z/` |
+| 2026-08-12 | P1-11 后全量回归和主栈重建 | unit/contract `50 passed`；integration `6 passed`；Ruff、ESLint、Vite build 通过；API/mock/Web healthy；主库 head `0002`；恢复库不存在，HF 仍仅 `.gitkeep` |
 
 ## 1. 实验目标
 
@@ -110,7 +116,21 @@
 - concurrency、QPS、timeout、retry、temperature、top_p、max_tokens、seed。
 - 开始/结束 UTC 时间、执行机器 CPU/内存和容器资源限制。
 
-### 3.2 Hugging Face 下载边界
+### 3.2 GPU 资源边界
+
+本机共 4 张 AMD Radeon AI PRO R9700。自 2026-08-12 起，所有本项目进程只能使用物理卡 `2,3`；物理卡 `0,1` 禁止使用。统一环境为：
+
+```bash
+export EVALHUB_GPU_DEVICES=2,3
+export ROCR_VISIBLE_DEVICES=2,3
+export HIP_VISIBLE_DEVICES=2,3
+export CUDA_VISIBLE_DEVICES=2,3
+export GPU_DEVICE_ORDINAL=2,3
+```
+
+ROCm Unique ID 分别为 `0x70f6f122856c649c` 和 `0x1ee7dc67425b7684`。CPU-only 服务不挂载 `/dev/kfd` 或 `/dev/dri`；未来新增 GPU runner 时必须显式限制设备并在实验报告记录可见设备，不能仅依赖人员约定。
+
+### 3.3 Hugging Face 下载边界
 
 所有 Harness、tokenizer 和 dataset 下载必须落在项目目录内：
 
@@ -125,7 +145,7 @@ export LM_HARNESS_CACHE_PATH="$PROJECT_ROOT/hf_cache/lm_eval/requests"
 
 执行前必须完成数据集许可证和内部使用范围审核。禁止使用默认的 `~/.cache/huggingface`，禁止开启未审核的 `trust_remote_code`。实验结束后输出 `hf_cache/download-manifest.json`，记录 repo、revision、文件 hash、大小和下载时间。
 
-### 3.3 实验证据目录
+### 3.4 实验证据目录
 
 ```text
 artifacts/experiments/<experiment-id>/
@@ -217,7 +237,7 @@ Phase 1 只有在以下条件全部满足时关闭：
 - [ ] 第 18 节所有功能、正确性和非功能验收逐条映射到实验 ID。
 - [ ] `pytest` 包含 unit/contract/integration/E2E，主分支无跳过的关键测试。
 - [ ] 干净机器只需 `.env`、secret 和 `docker compose up -d --build` 即可启动。
-- [ ] 备份恢复和 worker crash 演练至少各成功一次。
+- [x] 备份恢复和 worker crash 演练至少各成功一次（P1-10、P1-11）。
 - [ ] 已知限制、默认资源上限和操作手册完成评审。
 - [ ] 创建 `mvp-v1.0.0` tag，并冻结 migration head、镜像 digest 和 golden checksum。
 
