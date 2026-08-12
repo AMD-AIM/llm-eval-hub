@@ -33,6 +33,7 @@
 | P1-11 实现检查点 | DONE | commit `0d10454`（GPU 边界、全服务重启、双次 clean restore 和逐表 checksum） |
 | 当前回归/部署 | DONE | P1-12 Chromium `2 passed`；50 unit/contract + 6 integration；Ruff/ESLint/build 通过；E2E npm audit 0 漏洞；主 Compose healthy |
 | P1-12 Browser E2E | DONE | 100 样本完整 UI 闭环；SSE 刷新 `6/100 -> 16/100`；桌面/移动无 overflow/overlap；JSONL/CSV 各 100 条可解析；证据 `artifacts/experiments/P1-12-browser-e2e-20260812T094443Z/` |
+| P1-12 实现检查点 | DONE | commit `7175e3c`（隔离 Browser E2E、证据链、HTTP UUID fallback 与 Chromium pattern 修复） |
 | P1-13 Secret/SSRF | NOT STARTED | 下一项 P1-13 Secret/SSRF |
 | B2/R2 Phase 2 | NOT STARTED | 必须先通过 Phase 1 退出门 |
 
@@ -71,6 +72,7 @@
 | 2026-08-12 | 完成 P1-12 隔离 Browser E2E 编排 | 新增 Playwright `1.62.1` Chromium 镜像、独立库 `evalhub_p1_12_e2e`、Redis DB 13、独立 mock/API/worker/Web 和自动清理；修复 Nginx IPv4 healthcheck 与 Docker context 宿主依赖污染；npm audit 0 漏洞 |
 | 2026-08-12 | Browser E2E 发现并修复前端兼容性缺陷 | HTTP 内网 hostname 下 `crypto.randomUUID` 不可用，改为原生优先并用 `crypto.getRandomValues` 生成 UUID v4；修复 Chromium `v` 正则模式下 dataset name HTML pattern 非法问题；ESLint/build 通过 |
 | 2026-08-12 | 完成 P1-12 正式实验和全量回归 | Run `195d2439...01bc`；Chromium 桌面 `1440x1000`、移动 `390x844` 共 `2 passed`；100 样本 accuracy `1.0`；SSE 刷新进度单调；样本筛选/详情、JSONL/CSV 导出通过；13 条结构化断言和 trace/截图/HTML report 已归档于 `artifacts/experiments/P1-12-browser-e2e-20260812T094443Z/`；50 unit/contract + 6 integration、Ruff/ESLint/build 通过；E2E 容器无 device mapping，隔离库/Redis/`zihao` artifact 卷均已清理，HF 仍仅 `.gitkeep` |
+| 2026-08-12 | 固化 P1-12 实现检查点 | commit `7175e3c`；Playwright 报告、trace、截图、导出文件、HF 缓存、环境文件和密钥未纳入提交 |
 
 ## 1. 实验目标
 
