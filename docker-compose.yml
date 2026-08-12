@@ -232,6 +232,37 @@ services:
         condition: service_started
     profiles: [experiment]
 
+  crash-experiment:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: test
+    container_name: zihao-evalhub-crash-experiment
+    command: python -m tests.experiments.run_worker_crash
+    environment:
+      EVALHUB_TEST_DATABASE_SERVER_URL: >-
+        postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/postgres
+      EVALHUB_TEST_MOCK_BASE_URL: http://mock-openai:8001/v1
+      EVALHUB_TEST_REDIS_URL: redis://redis:6379/14
+      EVALHUB_GIT_SHA: ${EVALHUB_GIT_SHA:-working-tree}
+      EVALHUB_COMPOSE_CONFIG_SHA256: ${EVALHUB_COMPOSE_CONFIG_SHA256:-working-tree}
+      APP_ENV: test
+      DATABASE_URL: >-
+        postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/evalhub_p1_10_worker_crash
+      REDIS_URL: redis://redis:6379/14
+      CELERY_BROKER_URL: redis://redis:6379/14
+      CELERY_RESULT_BACKEND: redis://redis:6379/14
+    volumes:
+      - ./artifacts:/workspace/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mock-openai:
+        condition: service_started
+    profiles: [experiment]
+
   web:
     build:
       context: apps/web

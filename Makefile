@@ -1,4 +1,4 @@
-.PHONY: bootstrap generate-fixtures test test-integration test-capacity test-qps test-faults test-cancel lint up down logs migrate web-dev api-dev
+.PHONY: bootstrap generate-fixtures test test-integration test-capacity test-qps test-faults test-cancel test-worker-crash lint up down logs migrate web-dev api-dev
 
 bootstrap:
 	python3 -m venv .venv
@@ -34,6 +34,9 @@ test-cancel:
 	docker compose up -d --build --force-recreate mock-openai
 	docker compose --profile experiment build cancel-experiment
 	EVALHUB_GIT_SHA=$$(git rev-parse HEAD) docker compose --profile experiment run --rm cancel-experiment
+
+test-worker-crash:
+	EVALHUB_GIT_SHA=$$(git rev-parse HEAD) bash tests/experiments/run_worker_crash.sh
 
 lint:
 	.venv/bin/ruff check apps packages workers tests
