@@ -8,7 +8,7 @@
 
 ## 0. 实时执行状态
 
-> 最后更新：2026-08-12 10:53 CST
+> 最后更新：2026-08-12 10:54 CST
 
 | 项目 | 状态 | 当前证据/结果 |
 |---|---|---|
@@ -30,6 +30,7 @@
 | P1-10 实现检查点 | DONE | commit `579b02e`（真实容器故障编排、独立实验控制器、证据和恢复清理） |
 | GPU 资源边界 | DONE | 本机 4× AMD Radeon AI PRO R9700；后续仅允许物理卡 `2,3`，P1-11 不挂载 GPU 设备、实际 GPU 使用为 0 |
 | P1-11 Restart/restore | DONE | 6 服务完成 restart；17 张 public 表两次 clean restore checksum 一致；backup 57,645 bytes、权限 0600 |
+| P1-11 实现检查点 | DONE | commit `0d10454`（GPU 边界、全服务重启、双次 clean restore 和逐表 checksum） |
 | 当前回归/部署 | DONE | P1-11 专项 PASS；50 unit/contract + 6 integration；Ruff/ESLint/build 通过；Compose healthy；主库 head `0002` |
 | P1-12 至 P1-13 | NOT STARTED | 下一项 P1-12 Browser E2E |
 | B2/R2 Phase 2 | NOT STARTED | 必须先通过 Phase 1 退出门 |
@@ -64,6 +65,7 @@
 | 2026-08-12 | 完成 P1-11 实验编排 | 新增 6 服务 restart 生命周期证据、17 张 public 表 schema/data 规范化 SHA-256、custom-format pg_dump、隔离库双次 drop/create/restore 和失败自动清理；Ruff、shell syntax、Compose config 通过 |
 | 2026-08-12 | 完成 P1-11 正式实验 | 6 服务均原容器重启且健康，主库重启前后 checksum 不变；backup 57,645 bytes、mode `0600`、SHA-256 `5001ac...3b9c`；两次 clean restore 均匹配源库 `399a4d...ccc3`，head `0002`；恢复库已删除；证据 `artifacts/experiments/P1-11-restart-restore-20260812T024953Z/` |
 | 2026-08-12 | P1-11 后全量回归和主栈重建 | unit/contract `50 passed`；integration `6 passed`；Ruff、ESLint、Vite build 通过；API/mock/Web healthy；主库 head `0002`；恢复库不存在，HF 仍仅 `.gitkeep` |
+| 2026-08-12 | 固化 P1-11 实现检查点 | commit `0d10454`；备份/证据、HF 缓存、环境文件和密钥未纳入提交 |
 
 ## 1. 实验目标
 
