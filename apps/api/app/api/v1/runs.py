@@ -100,6 +100,19 @@ def _effective_concurrency(
     )
 
 
+def _dataset_selection_warnings(versions: list[DatasetVersion]) -> list[str]:
+    warnings: list[str] = []
+    selected_names = {version.manifest_json["metadata"]["name"] for version in versions}
+    for version in versions:
+        subset_of = version.manifest_json["protocol"].get("subset_of")
+        if subset_of in selected_names:
+            warnings.append(
+                f"{version.manifest_json['metadata']['name']} is a subset of {subset_of}; "
+                "selecting both repeats samples and model requests"
+            )
+    return warnings
+
+
 @router.post("/validate", response_model=RunValidationResponse)
 def validate_run(
     payload: RunCreate,
@@ -111,6 +124,7 @@ def validate_run(
     warnings: list[str] = []
     if endpoint.status != "healthy":
         warnings.append("Endpoint has not passed its latest connectivity probe")
+    warnings.extend(_dataset_selection_warnings(versions))
     return RunValidationResponse(
         valid=True,
         sample_count=sum(version.row_count for version in versions),

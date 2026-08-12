@@ -27,11 +27,29 @@ docker compose up -d --build
 
 供应商不提供 `/v1/models` 时，探测会使用手工填写的 Model ID。公网域名仍受 `ALLOWED_ENDPOINT_HOSTS` 精确白名单约束；当前 Compose 默认允许 `developer.amd.com.cn`，不要通过放开全部公网 CIDR 绕过 SSRF 防护。
 
-当前 Native Engine 只发送文本 `chat/completions`。现有主库只有 12 条中文意图分类数据，可验证 API 闭环和该数据集 accuracy/F1；图片输入、MMLU/C-Eval 等标准 benchmark 尚未接入，不能把这次结果解释为完整的多模态或通用能力评分。
+当前 Native Engine 只发送文本 `chat/completions`。主库已经注册 12 条中文意图分类数据，以及下面三套冻结 benchmark 数据。图片输入、C-Eval 和官方 Harness/loglikelihood 协议尚未接入，Native MMLU 的结果不能直接等同于官方 MMLU 分数。
+
+## 基础 Benchmark 数据
+
+| 数据集 | 样本数 | Native 协议 |
+|---|---:|---|
+| `gsm8k-native` | 1,319 | test split，0-shot 生成最终数字 |
+| `mmlu-lite-native` | 570 | 57 个 subject 各固定抽样 10 条，0-shot 生成选项字母 |
+| `mmlu-full-native` | 14,042 | all/test 完整 57 个 subject，0-shot 生成选项字母 |
+
+`mmlu-lite-native` 是 Full 的严格子集，单次评测应二选一；同时选择时预检会提示重复样本和重复 API 请求。数据源 revision、输入/输出 SHA-256 和抽样规则冻结在 `datasets/benchmarks/source-lock.json`。
+
+从固定上游 revision 重新准备并幂等注册数据：
+
+```bash
+make bootstrap-data
+make prepare-benchmarks
+make register-benchmarks
+```
 
 ## Hugging Face 数据目录
 
-项目不会自动下载 Hugging Face 数据。若后续显式同步数据，必须使用仓库内路径：
+项目不会在服务启动时自动下载 Hugging Face 数据。`make prepare-benchmarks` 的下载必须使用仓库内路径：
 
 ```bash
 export HF_HOME="$PWD/hf_cache"

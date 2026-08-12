@@ -8,7 +8,7 @@
 
 ## 0. 实时执行状态
 
-> 最后更新：2026-08-12 18:40 CST
+> 最后更新：2026-08-12 19:03 CST
 
 | 项目 | 状态 | 当前证据/结果 |
 |---|---|---|
@@ -31,12 +31,13 @@
 | GPU 资源边界 | DONE | 本机 4× AMD Radeon AI PRO R9700；后续仅允许物理卡 `2,3`，P1-11 不挂载 GPU 设备、实际 GPU 使用为 0 |
 | P1-11 Restart/restore | DONE | 6 服务完成 restart；17 张 public 表两次 clean restore checksum 一致；backup 57,645 bytes、权限 0600 |
 | P1-11 实现检查点 | DONE | commit `0d10454`（GPU 边界、全服务重启、双次 clean restore 和逐表 checksum） |
-| 当前回归/部署 | DONE | P1-12 Chromium `2 passed`；51 unit/contract + 6 integration；Ruff/ESLint/build 通过；主 Compose healthy |
+| 当前回归/部署 | DONE | P1-12 Chromium `2 passed`；58 unit/contract + 6 integration；Ruff/ESLint/build 通过；主 Compose healthy |
 | P1-12 Browser E2E | DONE | 100 样本完整 UI 闭环；SSE 刷新 `6/100 -> 16/100`；桌面/移动无 overflow/overlap；JSONL/CSV 各 100 条可解析；证据 `artifacts/experiments/P1-12-browser-e2e-20260812T094443Z/` |
 | P1-12 实现检查点 | DONE | commit `7175e3c`（隔离 Browser E2E、证据链、HTTP UUID fallback 与 Chromium pattern 修复） |
 | 真实 Endpoint 接入易用性 | DONE | 登记时 Model ID、手工补充模型、自动探测、无 `/models` 回退和结构化错误展示均已落地；精确放行 `developer.amd.com.cn`，Browser E2E `2 passed` |
+| Native Benchmark 基础数据 | DONE | GSM8K test `1,319`；MMLU Lite `570`（57 subject x 10）；MMLU Full `14,042`；固定 revision/checksum，API 幂等注册和浏览器可见性通过 |
 | P1-13 Secret/SSRF | NOT STARTED | 下一项 P1-13 Secret/SSRF |
-| B2/R2 Phase 2 | NOT STARTED | 必须先通过 Phase 1 退出门 |
+| B2/R2 Phase 2 | NOT STARTED | 本次数据包使用 Native 0-shot generated-text 协议；Harness adapter、官方 few-shot/loglikelihood 和回归比较能力仍待 P1 退出门后实现 |
 
 状态枚举：`NOT STARTED`、`IN PROGRESS`、`BLOCKED`、`DONE`。只有实验断言和证据落盘后才能标记 `DONE`。
 
@@ -76,6 +77,9 @@
 | 2026-08-12 | 固化 P1-12 实现检查点 | commit `7175e3c`；Playwright 报告、trace、截图、导出文件、HF 缓存、环境文件和密钥未纳入提交 |
 | 2026-08-12 | 启动真实 OpenAI-compatible endpoint 接入易用性修复 | 识别公网 endpoint 被 SSRF allowlist 拒绝、登记表单缺少 Model ID、供应商无 `/models` 时前端无法继续三个阻塞点；仅加入精确供应商主机 allowlist，不记录用户 API Key |
 | 2026-08-12 | 完成真实 OpenAI-compatible endpoint 接入易用性修复 | 精确域名策略和主栈健康检查通过；`51` unit/contract + `6` integration；Browser E2E 首轮因旧脚本重复点击收起详情失败，修正交互假设并切换真实 API 友好的默认表单后从零重跑 `2 passed`，最终证据 `artifacts/experiments/P1-12-browser-e2e-20260812T103916Z/` |
+| 2026-08-12 | 审核并冻结 GSM8K/MMLU 基础数据源 | 仅下载 `openai/gsm8k@740312add88f781978c0658806c59bc2815b9866` 和 `cais/mmlu@c30699e8356da336a370243923dbaf21066bb9fe` 的 README/test parquet；许可证均为 MIT；下载只写入项目 `hf_cache/`，明细见 `hf_cache/download-manifest.json` |
+| 2026-08-12 | 生成三套 Native benchmark 数据包 | GSM8K `1,319`、MMLU Lite `570`、MMLU Full `14,042`；Lite 按固定 seed 每 subject 取 10 条且是 Full 严格子集；数据 SHA-256 分别为 `e713b086...d4a53`、`b601ca6d...1e0c`、`d025717f...fea6`，source lock SHA-256 为 `c454b4f7...9f29` |
+| 2026-08-12 | 注册并部署 Native benchmark 数据包 | 三版本 API 重复注册均返回 `unchanged`；三数据集预检 `valid=true`、总计 `15,931` 条，并对 Lite+Full 重复选择发出警告；数据页和新建评测向导浏览器 smoke 通过；`58` unit/contract + `6` integration、Ruff、Compose config 和主栈健康检查通过；未创建正式 run，未产生外部模型调用 |
 
 ## 1. 实验目标
 
@@ -294,6 +298,18 @@ API/Native worker 不直接导入 Harness 的完整依赖。Harness runner 使�
 | `internal-regression-v1` | 内部冻结数据集 | Native chat generation | 100 | 全量内部 regression set |
 
 注意：`--limit` 只用于 smoke，不用于正式可对比结果。正式 baseline 必须使用完整 split 或固定 sample ID 清单，且不得把两种方式混在同一个比较组。
+
+#### 5.3.1 Native 基础数据包（已提前完成）
+
+为使仅提供标准 `chat/completions` 的 API 可以先完成端到端精度测试，Phase 1 主库已注册以下冻结数据。它们复用 Native Engine，不代表 B2 Harness adapter 已完成。
+
+| 数据集 | 固定上游 revision | 样本数 | 协议与边界 |
+|---|---|---:|---|
+| `gsm8k-native` | `openai/gsm8k@740312add88f781978c0658806c59bc2815b9866` | 1,319 | test split；0-shot 生成最终数字；取最后一个合法数值评分；不是 Harness 默认 5-shot |
+| `mmlu-lite-native` | `cais/mmlu@c30699e8356da336a370243923dbaf21066bb9fe` | 570 | all/test；固定 seed `mmlu-lite-v1-20260812`，57 subject 各 10 条；0-shot 生成 A/B/C/D |
+| `mmlu-full-native` | `cais/mmlu@c30699e8356da336a370243923dbaf21066bb9fe` | 14,042 | all/test 完整 57 subject；0-shot 生成 A/B/C/D；不是官方 loglikelihood multiple-choice |
+
+冻结产物位于 `datasets/benchmarks/`，下载源位于项目 `hf_cache/`，来源和产物 hash 记录在 `datasets/benchmarks/source-lock.json`。Lite 的 sample ID 是 Full 的严格子集；创建运行时应二选一，同时选中会在预检阶段提示重复请求。官方 Harness GSM8K 5-shot 和 MMLU loglikelihood 结果必须继续通过 B2-01 至 B2-07 建立，不能与这些 Native 0-shot 指标直接横向比较。
 
 ### 5.4 Harness 冻结配置
 

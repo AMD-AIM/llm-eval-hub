@@ -38,6 +38,16 @@ x-backend: &backend
     - host.docker.internal:host-gateway
 
 services:
+  artifact-init:
+    <<: *backend
+    container_name: zihao-evalhub-artifact-init
+    user: "0:0"
+    command: >-
+      sh -c "mkdir -p /var/lib/eval-hub/artifacts/datasets &&
+      chown 1024:1024 /var/lib/eval-hub/artifacts
+      /var/lib/eval-hub/artifacts/datasets"
+    restart: "no"
+
   postgres:
     image: postgres:16.9-alpine
     container_name: zihao-evalhub-postgres
@@ -76,6 +86,8 @@ services:
     ports:
       - "18000:8000"
     depends_on:
+      artifact-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

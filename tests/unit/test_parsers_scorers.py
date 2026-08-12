@@ -54,6 +54,16 @@ def test_numeric_match_respects_absolute_tolerance() -> None:
     assert scorer.score(sample, answer).passed is True
 
 
+def test_numeric_parser_can_select_last_number_for_reasoned_answers() -> None:
+    sample = EvalSample("s1", {}, "18")
+    parser = create_parser({"type": "numeric", "selection": "last"})
+
+    answer = parser.parse(sample, inference("16 - 7 = 9, then 9 * 2 = 18"))
+
+    assert answer.status == "ok"
+    assert answer.value == "18"
+
+
 def test_parser_failure_is_not_silently_scored_as_wrong() -> None:
     sample = EvalSample("s1", {}, "billing")
     parser = create_parser({"type": "label_set", "labels": ["billing"]})

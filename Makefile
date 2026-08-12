@@ -1,4 +1,4 @@
-.PHONY: bootstrap generate-fixtures test test-integration test-capacity test-qps test-faults test-cancel test-worker-crash test-restart-restore test-browser-e2e lint up down logs migrate web-dev api-dev
+.PHONY: bootstrap bootstrap-data generate-fixtures prepare-benchmarks register-benchmarks test test-integration test-capacity test-qps test-faults test-cancel test-worker-crash test-restart-restore test-browser-e2e lint up down logs migrate web-dev api-dev
 
 bootstrap:
 	python3 -m venv .venv
@@ -8,6 +8,15 @@ bootstrap:
 
 generate-fixtures:
 	.venv/bin/python -m tests.fixtures.generate_mvp_dataset --output datasets/experiments
+
+bootstrap-data:
+	.venv/bin/pip install -r requirements-data.txt
+
+prepare-benchmarks:
+	HF_HOME=$(CURDIR)/hf_cache HF_HUB_CACHE=$(CURDIR)/hf_cache/hub HF_DATASETS_CACHE=$(CURDIR)/hf_cache/datasets HUGGINGFACE_HUB_CACHE=$(CURDIR)/hf_cache/hub .venv/bin/python scripts/prepare_benchmarks.py
+
+register-benchmarks:
+	.venv/bin/python scripts/register_benchmarks.py
 
 test:
 	.venv/bin/pytest
@@ -45,7 +54,7 @@ test-browser-e2e:
 	EVALHUB_GIT_SHA=$$(git rev-parse HEAD) bash tests/experiments/run_browser_e2e.sh
 
 lint:
-	.venv/bin/ruff check apps packages workers tests
+	.venv/bin/ruff check apps packages workers scripts tests
 
 up:
 	docker compose up -d --build

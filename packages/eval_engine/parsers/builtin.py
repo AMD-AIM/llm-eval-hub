@@ -81,12 +81,18 @@ class BuiltinParser:
             return ParsedAnswer(normalized, "ok", self.version, {"normalized": normalized})
 
         if parser_type == "numeric":
-            match = re.search(
-                r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?",
-                text.replace(",", ""),
+            matches = list(
+                re.finditer(
+                    r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?",
+                    text.replace(",", ""),
+                )
             )
-            if not match:
+            if not matches:
                 return ParsedAnswer(None, "no_match", self.version, {})
+            selection = self.config.get("selection", "first")
+            if selection not in {"first", "last"}:
+                raise ValueError(f"Unsupported numeric selection: {selection}")
+            match = matches[-1] if selection == "last" else matches[0]
             try:
                 value = Decimal(match.group(0))
             except InvalidOperation:
