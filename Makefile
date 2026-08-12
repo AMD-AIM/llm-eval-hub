@@ -1,4 +1,4 @@
-.PHONY: bootstrap generate-fixtures test test-integration test-capacity test-qps test-faults test-cancel test-worker-crash test-restart-restore lint up down logs migrate web-dev api-dev
+.PHONY: bootstrap generate-fixtures test test-integration test-capacity test-qps test-faults test-cancel test-worker-crash test-restart-restore test-browser-e2e lint up down logs migrate web-dev api-dev
 
 bootstrap:
 	python3 -m venv .venv
@@ -40,6 +40,9 @@ test-worker-crash:
 
 test-restart-restore:
 	EVALHUB_GIT_SHA=$$(git rev-parse HEAD) bash tests/experiments/run_restart_restore.sh
+
+test-browser-e2e:
+	EVALHUB_GIT_SHA=$$(git rev-parse HEAD) bash tests/experiments/run_browser_e2e.sh
 
 lint:
 	.venv/bin/ruff check apps packages workers tests

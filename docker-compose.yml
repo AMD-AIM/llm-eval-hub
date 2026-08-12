@@ -107,6 +107,149 @@ services:
       - "18001:8001"
     restart: unless-stopped
 
+  e2e-mock-openai:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+    container_name: zihao-evalhub-e2e-mock-openai
+    command: uvicorn tests.fixtures.mock_openai:app --host 0.0.0.0 --port 8001
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/healthz')"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    profiles: [e2e]
+
+  e2e-api:
+    <<: *backend
+    image: zihao-llm-eval-hub-e2e-api
+    container_name: zihao-evalhub-e2e-api
+    env_file: []
+    command: >-
+      sh -c "alembic upgrade head &&
+      uvicorn apps.api.app.main:app --host 0.0.0.0 --port 8000"
+    environment:
+      <<: *gpu-boundary
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/evalhub_p1_12_e2e
+      REDIS_URL: redis://redis:6379/13
+      CELERY_BROKER_URL: redis://redis:6379/13
+      CELERY_RESULT_BACKEND: redis://redis:6379/13
+      ARTIFACT_ROOT: /var/lib/eval-hub/artifacts/e2e
+      HF_HOME: /workspace/hf_cache
+      HF_HUB_CACHE: /workspace/hf_cache/hub
+      HF_DATASETS_CACHE: /workspace/hf_cache/datasets
+      HUGGINGFACE_HUB_CACHE: /workspace/hf_cache/hub
+      ADMIN_API_KEY: zihao-e2e-key
+      ALLOWED_ENDPOINT_HOSTS: e2e-mock-openai
+      ALLOWED_ENDPOINT_CIDRS: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      ALLOW_INSECURE_HTTP: "true"
+      WEB_ORIGIN: http://e2e-web
+    volumes:
+      - zihao_evalhub_e2e_artifacts:/var/lib/eval-hub/artifacts
+      - ./hf_cache:/workspace/hf_cache
+    depends_on:
+      e2e-artifact-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      e2e-mock-openai:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+    profiles: [e2e]
+
+  e2e-artifact-init:
+    image: zihao-llm-eval-hub-e2e-api
+    container_name: zihao-evalhub-e2e-artifact-init
+    user: "0:0"
+    command: >-
+      sh -c "mkdir -p /var/lib/eval-hub/artifacts/e2e &&
+      chown -R 1024:1024 /var/lib/eval-hub/artifacts"
+    volumes:
+      - zihao_evalhub_e2e_artifacts:/var/lib/eval-hub/artifacts
+    profiles: [e2e]
+
+  e2e-worker:
+    <<: *backend
+    container_name: zihao-evalhub-e2e-worker
+    env_file: []
+    command: celery -A workers.celery_app worker -Q native --concurrency=4 --loglevel=INFO
+    environment:
+      <<: *gpu-boundary
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/evalhub_p1_12_e2e
+      REDIS_URL: redis://redis:6379/13
+      CELERY_BROKER_URL: redis://redis:6379/13
+      CELERY_RESULT_BACKEND: redis://redis:6379/13
+      ARTIFACT_ROOT: /var/lib/eval-hub/artifacts/e2e
+      HF_HOME: /workspace/hf_cache
+      HF_HUB_CACHE: /workspace/hf_cache/hub
+      HF_DATASETS_CACHE: /workspace/hf_cache/datasets
+      HUGGINGFACE_HUB_CACHE: /workspace/hf_cache/hub
+      ADMIN_API_KEY: zihao-e2e-key
+      ALLOWED_ENDPOINT_HOSTS: e2e-mock-openai
+      ALLOWED_ENDPOINT_CIDRS: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      ALLOW_INSECURE_HTTP: "true"
+      WEB_ORIGIN: http://e2e-web
+    volumes:
+      - zihao_evalhub_e2e_artifacts:/var/lib/eval-hub/artifacts
+      - ./hf_cache:/workspace/hf_cache
+    depends_on:
+      e2e-api:
+        condition: service_healthy
+    profiles: [e2e]
+
+  e2e-web:
+    build:
+      context: apps/web
+      dockerfile: Dockerfile
+    container_name: zihao-evalhub-e2e-web
+    volumes:
+      - ./tests/e2e/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      e2e-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    profiles: [e2e]
+
+  browser-e2e:
+    build:
+      context: .
+      dockerfile: tests/e2e/Dockerfile
+    container_name: zihao-evalhub-browser-e2e
+    environment:
+      <<: *gpu-boundary
+      E2E_BASE_URL: http://e2e-web
+      E2E_API_KEY: zihao-e2e-key
+      E2E_EVIDENCE_DIR: ${E2E_EVIDENCE_DIR:-/workspace/artifacts/e2e}
+      EVALHUB_GIT_SHA: ${EVALHUB_GIT_SHA:-working-tree}
+      EVALHUB_COMPOSE_CONFIG_SHA256: ${EVALHUB_COMPOSE_CONFIG_SHA256:-working-tree}
+      EVALHUB_GPU_DEVICES: ${EVALHUB_GPU_DEVICES:-2,3}
+      EVALHUB_GPU_UNIQUE_IDS: ${EVALHUB_GPU_UNIQUE_IDS:-unknown,unknown}
+    volumes:
+      - ./artifacts:/workspace/artifacts
+    depends_on:
+      e2e-mock-openai:
+        condition: service_healthy
+      e2e-api:
+        condition: service_healthy
+      e2e-worker:
+        condition: service_started
+      e2e-web:
+        condition: service_healthy
+    profiles: [e2e]
+
   integration-tests:
     build:
       context: .
@@ -319,3 +462,5 @@ volumes:
     name: zihao_evalhub_pgdata
   zihao_evalhub_redisdata:
     name: zihao_evalhub_redisdata
+  zihao_evalhub_e2e_artifacts:
+    name: zihao_evalhub_e2e_artifacts

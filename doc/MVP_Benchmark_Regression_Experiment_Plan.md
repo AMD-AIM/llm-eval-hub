@@ -4,11 +4,11 @@
 > 编写日期：2026-08-11  
 > 适用范围：Phase 1 MVP 收口、Phase 2 标准 Benchmark 与回归能力  
 > 执行目录：`/home/zihaomu/bigssd_workspace/model_benchmark`  
-> 状态：执行中（Phase 1 / P1-12 Browser E2E 待执行）
+> 状态：执行中（Phase 1 / P1-12 Browser E2E 已完成，下一项 P1-13）
 
 ## 0. 实时执行状态
 
-> 最后更新：2026-08-12 10:54 CST
+> 最后更新：2026-08-12 17:45 CST
 
 | 项目 | 状态 | 当前证据/结果 |
 |---|---|---|
@@ -31,8 +31,9 @@
 | GPU 资源边界 | DONE | 本机 4× AMD Radeon AI PRO R9700；后续仅允许物理卡 `2,3`，P1-11 不挂载 GPU 设备、实际 GPU 使用为 0 |
 | P1-11 Restart/restore | DONE | 6 服务完成 restart；17 张 public 表两次 clean restore checksum 一致；backup 57,645 bytes、权限 0600 |
 | P1-11 实现检查点 | DONE | commit `0d10454`（GPU 边界、全服务重启、双次 clean restore 和逐表 checksum） |
-| 当前回归/部署 | DONE | P1-11 专项 PASS；50 unit/contract + 6 integration；Ruff/ESLint/build 通过；Compose healthy；主库 head `0002` |
-| P1-12 至 P1-13 | NOT STARTED | 下一项 P1-12 Browser E2E |
+| 当前回归/部署 | DONE | P1-12 Chromium `2 passed`；50 unit/contract + 6 integration；Ruff/ESLint/build 通过；E2E npm audit 0 漏洞；主 Compose healthy |
+| P1-12 Browser E2E | DONE | 100 样本完整 UI 闭环；SSE 刷新 `6/100 -> 16/100`；桌面/移动无 overflow/overlap；JSONL/CSV 各 100 条可解析；证据 `artifacts/experiments/P1-12-browser-e2e-20260812T094443Z/` |
+| P1-13 Secret/SSRF | NOT STARTED | 下一项 P1-13 Secret/SSRF |
 | B2/R2 Phase 2 | NOT STARTED | 必须先通过 Phase 1 退出门 |
 
 状态枚举：`NOT STARTED`、`IN PROGRESS`、`BLOCKED`、`DONE`。只有实验断言和证据落盘后才能标记 `DONE`。
@@ -66,6 +67,10 @@
 | 2026-08-12 | 完成 P1-11 正式实验 | 6 服务均原容器重启且健康，主库重启前后 checksum 不变；backup 57,645 bytes、mode `0600`、SHA-256 `5001ac...3b9c`；两次 clean restore 均匹配源库 `399a4d...ccc3`，head `0002`；恢复库已删除；证据 `artifacts/experiments/P1-11-restart-restore-20260812T024953Z/` |
 | 2026-08-12 | P1-11 后全量回归和主栈重建 | unit/contract `50 passed`；integration `6 passed`；Ruff、ESLint、Vite build 通过；API/mock/Web healthy；主库 head `0002`；恢复库不存在，HF 仍仅 `.gitkeep` |
 | 2026-08-12 | 固化 P1-11 实现检查点 | commit `0d10454`；备份/证据、HF 缓存、环境文件和密钥未纳入提交 |
+| 2026-08-12 | 启动 P1-12 Browser E2E | 完成 Endpoint、Dataset、评测向导、Run SSE/刷新、筛选、详情和导出交互审计；采用独立数据库和 Redis DB，浏览器/API/Web/worker 容器均使用 `zihao` 命名且不挂载 GPU 设备 |
+| 2026-08-12 | 完成 P1-12 隔离 Browser E2E 编排 | 新增 Playwright `1.62.1` Chromium 镜像、独立库 `evalhub_p1_12_e2e`、Redis DB 13、独立 mock/API/worker/Web 和自动清理；修复 Nginx IPv4 healthcheck 与 Docker context 宿主依赖污染；npm audit 0 漏洞 |
+| 2026-08-12 | Browser E2E 发现并修复前端兼容性缺陷 | HTTP 内网 hostname 下 `crypto.randomUUID` 不可用，改为原生优先并用 `crypto.getRandomValues` 生成 UUID v4；修复 Chromium `v` 正则模式下 dataset name HTML pattern 非法问题；ESLint/build 通过 |
+| 2026-08-12 | 完成 P1-12 正式实验和全量回归 | Run `195d2439...01bc`；Chromium 桌面 `1440x1000`、移动 `390x844` 共 `2 passed`；100 样本 accuracy `1.0`；SSE 刷新进度单调；样本筛选/详情、JSONL/CSV 导出通过；13 条结构化断言和 trace/截图/HTML report 已归档于 `artifacts/experiments/P1-12-browser-e2e-20260812T094443Z/`；50 unit/contract + 6 integration、Ruff/ESLint/build 通过；E2E 容器无 device mapping，隔离库/Redis/`zihao` artifact 卷均已清理，HF 仍仅 `.gitkeep` |
 
 ## 1. 实验目标
 

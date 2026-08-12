@@ -2,7 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Play } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, createIdempotencyKey } from "../api/client";
 import type { Dataset, Endpoint, Model, Run } from "../types";
 
 const steps = ["模型", "数据集", "执行参数", "预检确认"];
@@ -21,7 +21,7 @@ export function NewEvaluation() {
   const versionMap = useMemo(() => new Map(datasets.data?.flatMap((dataset) => dataset.versions.map((version) => [version.id, version]))), [datasets.data]);
   const payload = { name, endpoint_id: endpointId, model_id: modelId, datasets: selectedVersions.map((id) => ({ dataset_version_id: id, protocol_id: versionMap.get(id)?.manifest_json.protocol.id })), inference: { temperature: params.temperature, top_p: 1, max_tokens: params.max_tokens, seed: params.seed, stop: [] }, execution: { concurrency: params.concurrency, qps: params.qps, timeout_seconds: params.timeout_seconds, max_retries: params.max_retries } };
   const validate = useMutation({ mutationFn: () => api<{ valid: boolean; sample_count: number; effective_concurrency: number; warnings: string[] }>("/runs/validate", { method: "POST", body: JSON.stringify(payload) }) });
-  const create = useMutation({ mutationFn: () => api<Run>("/runs", { method: "POST", body: JSON.stringify(payload), headers: { "Idempotency-Key": crypto.randomUUID() } }), onSuccess: (run) => navigate(`/runs/${run.id}`) });
+  const create = useMutation({ mutationFn: () => api<Run>("/runs", { method: "POST", body: JSON.stringify(payload), headers: { "Idempotency-Key": createIdempotencyKey() } }), onSuccess: (run) => navigate(`/runs/${run.id}`) });
   const canNext = [Boolean(endpointId && modelId), selectedVersions.length > 0, Boolean(name && params.concurrency > 0), validate.data?.valid === true][step];
   const next = () => { if (step === 2) { validate.mutate(undefined, { onSuccess: () => setStep(3) }); } else setStep((value) => Math.min(3, value + 1)); };
 
@@ -39,4 +39,3 @@ export function NewEvaluation() {
     </div>
   );
 }
-
