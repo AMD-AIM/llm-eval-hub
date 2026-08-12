@@ -1,0 +1,26 @@
+{
+  "remote.autoForwardPorts": true,
+  "remote.autoForwardPortsSource": "hybrid",
+  "remote.restoreForwardedPorts": true,
+  "remote.localPortHost": "localhost",
+  "remote.portsAttributes": {
+    "18080": {
+      "label": "LLM Eval Hub Web",
+      "onAutoForward": "openBrowserOnce",
+      "protocol": "http",
+      "requireLocalPort": true
+    },
+    "18000": {
+      "label": "LLM Eval Hub API",
+      "onAutoForward": "silent",
+      "protocol": "http",
+      "requireLocalPort": true
+    },
+    "18001": {
+      "label": "LLM Eval Hub Mock OpenAI",
+      "onAutoForward": "silent",
+      "protocol": "http",
+      "requireLocalPort": true
+    }
+  }
+}
