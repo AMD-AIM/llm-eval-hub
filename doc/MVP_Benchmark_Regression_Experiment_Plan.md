@@ -37,6 +37,7 @@
 | 真实 Endpoint 接入易用性 | DONE | 登记时 Model ID、手工补充模型、自动探测、无 `/models` 回退和结构化错误展示均已落地；精确放行 `developer.amd.com.cn`，Browser E2E `2 passed` |
 | Native Benchmark 基础数据 | DONE | GSM8K test `1,319`；MMLU Lite `570`（57 subject x 10）；MMLU Full `14,042`；固定 revision/checksum，API 幂等注册和浏览器可见性通过 |
 | P1-13 Secret/SSRF | DONE | 13 项结构化断言全部 PASS；API/DB/Celery/Redis/log/evidence 完整 secret 命中均为 0；7 类恶意 URL 和 3 类敏感 header 均稳定返回 `422 ENDPOINT_POLICY`；证据 `artifacts/experiments/P1-13-secret-ssrf-20260813T082003Z/` |
+| P1-13 实现检查点 | DONE | commit `e6d8d52`（DNS/IP 复验、敏感 header 边界、隔离安全实验、回归与文档） |
 | B2/R2 Phase 2 | NOT STARTED | 本次数据包使用 Native 0-shot generated-text 协议；Harness adapter、官方 few-shot/loglikelihood 和回归比较能力仍待 P1 退出门后实现 |
 
 状态枚举：`NOT STARTED`、`IN PROGRESS`、`BLOCKED`、`DONE`。只有实验断言和证据落盘后才能标记 `DONE`。
@@ -83,6 +84,7 @@
 | 2026-08-13 | 审计并修复 P1-13 Secret/SSRF 边界 | 精确域名白名单不再跳过 DNS/IP 禁止网段检查；loopback/link-local/metadata/未授权地址拒绝；worker 每个 shard 出站前重新解析校验；禁止通过 `extra_headers` 注入 Authorization/API-Key/Cookie；create/update/probe 统一返回稳定 `ENDPOINT_POLICY` |
 | 2026-08-13 | 完成 P1-13 隔离安全实验 | 独立库 `evalhub_p1_13_security`、Redis DB 12 和 `zihao` 安全容器完成 100 样本凭据流；mock 仅记录 Authorization SHA-256，101 次请求均匹配；API、17 表数据库、Celery payload、Redis、服务日志和证据目录完整 canary 命中均为 0；7 类 SSRF 和 3 类敏感 header 全部拒绝；13 项断言 PASS，证据 `artifacts/experiments/P1-13-secret-ssrf-20260813T082003Z/` |
 | 2026-08-13 | P1-13 后全量回归与主栈部署 | unit/contract `69 passed`；integration `6 passed`；Ruff、ESLint、Vite build、Chromium 桌面/移动 `2 passed`；安全实验数据库/Redis DB 12/容器已清理；主 API/worker 以非 root、无 GPU device mapping 运行，现有 Endpoint DNS 策略校验和 Web `10.170.38.103:18080` 均通过 |
+| 2026-08-13 | 固化 P1-13 实现检查点 | commit `e6d8d52`；未提交实验证据、HF 缓存、环境文件或实际凭据 |
 
 ## 1. 实验目标
 
