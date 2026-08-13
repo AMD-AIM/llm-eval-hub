@@ -25,7 +25,9 @@ docker compose up -d --build
 5. Endpoint 状态变为 `healthy` 后，进入“新建测评”，选择模型、数据集版本和执行参数并创建运行。
 6. 运行详情页通过 SSE 显示实时进度，并提供逐样本结果、失败筛选和 CSV/JSONL 导出。
 
-供应商不提供 `/v1/models` 时，探测会使用手工填写的 Model ID。公网域名仍受 `ALLOWED_ENDPOINT_HOSTS` 精确白名单约束；当前 Compose 默认允许 `developer.amd.com.cn`，不要通过放开全部公网 CIDR 绕过 SSRF 防护。
+供应商不提供 `/v1/models` 时，探测会使用手工填写的 Model ID。公网域名仍受 `ALLOWED_ENDPOINT_HOSTS` 精确白名单约束；当前 Compose 默认允许 `developer.amd.com.cn`，不要通过放开全部公网 CIDR 绕过 SSRF 防护。精确白名单域名仍会执行 DNS/IP 禁止网段检查，worker 在模型请求前会重新校验，HTTP 重定向默认禁用。
+
+API Key 必须填写在 Endpoint 的加密凭据字段中。平台拒绝在 `extra_headers` 中配置 `Authorization`、`api-key`、`X-API-Key`、Cookie 等敏感 header，避免凭据进入普通 JSON 配置、fingerprint 或任务载荷。
 
 当前 Native Engine 只发送文本 `chat/completions`。主库已经注册 12 条中文意图分类数据，以及下面三套冻结 benchmark 数据。图片输入、C-Eval 和官方 Harness/loglikelihood 协议尚未接入，Native MMLU 的结果不能直接等同于官方 MMLU 分数。
 
@@ -59,3 +61,11 @@ export HUGGINGFACE_HUB_CACHE="$PWD/hf_cache/hub"
 ```
 
 Compose 已固定同样的容器内映射，下载内容最终落在本仓库 `hf_cache/` 下。
+
+## 安全回归
+
+```bash
+make test-security
+```
+
+该命令使用独立 PostgreSQL 数据库、Redis DB 12 和 `zihao` 测试容器运行 P1-13；扫描 API 响应、数据库、Celery/Redis payload、服务日志和证据目录，并验证 loopback、metadata、越权域名及敏感认证 header 均被稳定拒绝。测试只访问隔离 mock，不会调用已登记的真实模型 API。

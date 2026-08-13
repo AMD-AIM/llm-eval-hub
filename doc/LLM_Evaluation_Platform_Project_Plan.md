@@ -3,12 +3,12 @@
 > 文档状态：可用于立项、架构评审与 MVP 开发拆解  
 > 建议项目代号：`LLM Eval Hub`  
 > 版本：v0.1  
-> 更新日期：2026-08-12
+> 更新日期：2026-08-13
 
 ## 0. 实施状态（持续更新）
 
 > 开始实施：2026-08-11  
-> 当前阶段：Phase 1 / P1-01 至 P1-11 已通过，进入 Browser E2E 与安全收口
+> 当前阶段：Phase 1 / P1-01 至 P1-13 全部通过，进入退出门审计
 > 工作目录：`/home/zihaomu/bigssd_workspace/model_benchmark`（与 `/dc2/zihaomu/workspace/model_benchmark` 为同一目录）
 
 ### 0.1 当前进度
@@ -27,7 +27,9 @@
 - [x] 完成 Compose 构建启动和 12 样本首个 vertical slice 端到端验收。
 - [x] 将 Phase 1/2 细化为可执行的 MVP、Benchmark 与回归能力实验计划。
 - [x] 完成容量、共享 QPS、故障重试、取消、worker crash 和 PostgreSQL 双次恢复实验。
-- [ ] 完成第 18 节的 1,000 样本容量、worker crash、取消和备份恢复等完整 MVP 验收。
+- [x] 完成 Chromium 桌面/移动 Browser E2E、SSE 刷新恢复、筛选和 CSV/JSONL 导出验收。
+- [x] 完成 endpoint secret/API/数据库/Celery/Redis/log 扫描及 SSRF 拒绝矩阵，P1-01 至 P1-13 全部通过。
+- [ ] 完成第 18 节验收项到实验 ID 的逐条映射、操作手册评审与 `mvp-v1.0.0` 冻结。
 
 ### 0.2 原型阶段临时决策
 
@@ -54,6 +56,9 @@
 | 2026-08-11 | 细化 Phase 1/2 的实验矩阵、Benchmark 能力边界、paired regression、quality gate 和退出门 | 见 [`MVP_Benchmark_Regression_Experiment_Plan.md`](./MVP_Benchmark_Regression_Experiment_Plan.md) |
 | 2026-08-12 | 完成 P1-01 至 P1-11，加入后两卡资源硬约束 | 容量/QPS/故障/取消/worker crash/备份恢复通过；API/worker 仅暴露 GPU `2,3`，P1-11 未挂载 GPU 设备 |
 | 2026-08-12 | 完成 P1-11 后全量回归 | unit/contract `50 passed`；integration `6 passed`；Ruff、ESLint、Vite build 和主 Compose 健康检查通过 |
+| 2026-08-12 | 完成 P1-12 Browser E2E 与真实 Endpoint 接入 | Chromium 桌面/移动主流程、SSE 恢复、结果/筛选/导出通过；登记时可填写 Model ID，无 `/models` 时可继续；公网 Endpoint 仅允许精确域名 |
+| 2026-08-12 | 注册 Native Benchmark 基础数据包 | GSM8K `1,319`、MMLU Lite `570`、MMLU Full `14,042`；固定上游 revision/checksum，主库幂等注册和前端选择通过 |
+| 2026-08-13 | 完成 P1-13 Secret/SSRF | 13 项安全断言 PASS；完整 secret 在 API/DB/Celery/Redis/log/evidence 中 0 命中；loopback/metadata/越权域名和敏感认证 header 稳定拒绝；69 unit/contract、6 integration、Browser E2E 2 passed |
 
 ### 0.4 当前运行入口
 
@@ -65,9 +70,9 @@
 
 ### 0.5 Phase 1 剩余工作
 
-1. 完成 Playwright 浏览器主流程、SSE 刷新恢复、筛选与 CSV/JSONL 导出验收（P1-12）。
-2. 完成 secret/log/Celery payload 扫描和 SSRF 拒绝矩阵（P1-13）。
-3. 完成数据保留清理和生产 secret/Vault/KMS 接入；OIDC/RBAC 按 Phase 2 计划实施。
+1. 将第 18 节全部验收项逐条映射到 P1 实验 ID，并完成操作手册和默认资源上限评审。
+2. 从干净环境复核 Compose 启动，冻结 migration head、镜像 digest、golden checksum 并创建 `mvp-v1.0.0` tag。
+3. 完成数据保留清理和生产 Vault/KMS/egress firewall 接入；OIDC/RBAC 按 Phase 2 计划实施。
 4. 前端生产包中 ECharts 主 chunk 约 1.46 MB（gzip 约 484 KB），功能不受影响，后续应按路由和图表模块拆包。
 
 ## 1. 项目背景

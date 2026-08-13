@@ -27,6 +27,13 @@ from packages.eval_engine.fingerprint import protocol_fingerprint
 router = APIRouter(prefix="/endpoints", tags=["endpoints"])
 
 
+def _endpoint_policy_error(exc: EndpointPolicyError | ValueError) -> HTTPException:
+    return HTTPException(
+        status_code=422,
+        detail={"code": "ENDPOINT_POLICY", "message": str(exc)},
+    )
+
+
 def _active_revision(db: Session, endpoint: Endpoint) -> EndpointRevision:
     revision = db.get(EndpointRevision, endpoint.active_revision_id)
     if revision is None:
@@ -69,9 +76,7 @@ async def create_endpoint(
         base_url = await validate_endpoint_url(payload.base_url, settings)
         extra_headers = sanitized_extra_headers(payload.extra_headers)
     except (EndpointPolicyError, ValueError) as exc:
-        raise HTTPException(
-            status_code=422, detail={"code": "ENDPOINT_POLICY", "message": str(exc)}
-        ) from exc
+        raise _endpoint_policy_error(exc) from exc
     endpoint = Endpoint(
         name=payload.name,
         base_url=base_url,
@@ -155,11 +160,16 @@ async def update_endpoint(
         raise HTTPException(status_code=404, detail={"code": "ENDPOINT_NOT_FOUND"})
     previous = _active_revision(db, endpoint)
     changes = payload.model_dump(exclude_unset=True)
-    base_url = await validate_endpoint_url(changes.get("base_url", endpoint.base_url), settings)
-    config = dict(previous.config_json)
-    config.update({key: value for key, value in changes.items() if key != "api_key"})
-    config["base_url"] = base_url
-    config["extra_headers"] = sanitized_extra_headers(config.get("extra_headers", {}))
+    try:
+        base_url = await validate_endpoint_url(
+            changes.get("base_url", endpoint.base_url), settings
+        )
+        config = dict(previous.config_json)
+        config.update({key: value for key, value in changes.items() if key != "api_key"})
+        config["base_url"] = base_url
+        config["extra_headers"] = sanitized_extra_headers(config.get("extra_headers", {}))
+    except (EndpointPolicyError, ValueError) as exc:
+        raise _endpoint_policy_error(exc) from exc
     secret_ciphertext = previous.secret_ciphertext
     secret_hint = previous.secret_hint
     if "api_key" in changes:
@@ -202,7 +212,10 @@ async def probe_endpoint(
     if endpoint is None:
         raise HTTPException(status_code=404, detail={"code": "ENDPOINT_NOT_FOUND"})
     revision = _active_revision(db, endpoint)
-    await validate_endpoint_url(endpoint.base_url, settings)
+    try:
+        base_url = await validate_endpoint_url(endpoint.base_url, settings)
+    except EndpointPolicyError as exc:
+        raise _endpoint_policy_error(exc) from exc
     requested_model = payload.model_id or db.scalar(
         select(Model.model_name)
         .where(Model.endpoint_id == endpoint.id, Model.enabled.is_(True))
@@ -210,7 +223,7 @@ async def probe_endpoint(
         .limit(1)
     )
     result = await probe_openai_endpoint(
-        base_url=endpoint.base_url,
+        base_url=base_url,
         auth_type=endpoint.auth_type,
         api_key=SecretCipher().decrypt(revision.secret_ciphertext),
         extra_headers=revision.config_json.get("extra_headers", {}),

@@ -4,11 +4,11 @@
 > 编写日期：2026-08-11  
 > 适用范围：Phase 1 MVP 收口、Phase 2 标准 Benchmark 与回归能力  
 > 执行目录：`/home/zihaomu/bigssd_workspace/model_benchmark`  
-> 状态：执行中（Phase 1 / P1-12 Browser E2E 已完成，下一项 P1-13）
+> 状态：执行中（Phase 1 / P1-01 至 P1-13 全部通过，进入退出门审计）
 
 ## 0. 实时执行状态
 
-> 最后更新：2026-08-12 19:03 CST
+> 最后更新：2026-08-13 16:22 CST
 
 | 项目 | 状态 | 当前证据/结果 |
 |---|---|---|
@@ -31,12 +31,12 @@
 | GPU 资源边界 | DONE | 本机 4× AMD Radeon AI PRO R9700；后续仅允许物理卡 `2,3`，P1-11 不挂载 GPU 设备、实际 GPU 使用为 0 |
 | P1-11 Restart/restore | DONE | 6 服务完成 restart；17 张 public 表两次 clean restore checksum 一致；backup 57,645 bytes、权限 0600 |
 | P1-11 实现检查点 | DONE | commit `0d10454`（GPU 边界、全服务重启、双次 clean restore 和逐表 checksum） |
-| 当前回归/部署 | DONE | P1-12 Chromium `2 passed`；58 unit/contract + 6 integration；Ruff/ESLint/build 通过；主 Compose healthy |
+| 当前回归/部署 | DONE | 69 unit/contract + 6 integration；P1-12 Chromium `2 passed`；Ruff/ESLint/build 通过；主 API/worker 已部署 P1-13 防护，Web `10.170.38.103:18080` 返回 200 |
 | P1-12 Browser E2E | DONE | 100 样本完整 UI 闭环；SSE 刷新 `6/100 -> 16/100`；桌面/移动无 overflow/overlap；JSONL/CSV 各 100 条可解析；证据 `artifacts/experiments/P1-12-browser-e2e-20260812T094443Z/` |
 | P1-12 实现检查点 | DONE | commit `7175e3c`（隔离 Browser E2E、证据链、HTTP UUID fallback 与 Chromium pattern 修复） |
 | 真实 Endpoint 接入易用性 | DONE | 登记时 Model ID、手工补充模型、自动探测、无 `/models` 回退和结构化错误展示均已落地；精确放行 `developer.amd.com.cn`，Browser E2E `2 passed` |
 | Native Benchmark 基础数据 | DONE | GSM8K test `1,319`；MMLU Lite `570`（57 subject x 10）；MMLU Full `14,042`；固定 revision/checksum，API 幂等注册和浏览器可见性通过 |
-| P1-13 Secret/SSRF | NOT STARTED | 下一项 P1-13 Secret/SSRF |
+| P1-13 Secret/SSRF | DONE | 13 项结构化断言全部 PASS；API/DB/Celery/Redis/log/evidence 完整 secret 命中均为 0；7 类恶意 URL 和 3 类敏感 header 均稳定返回 `422 ENDPOINT_POLICY`；证据 `artifacts/experiments/P1-13-secret-ssrf-20260813T082003Z/` |
 | B2/R2 Phase 2 | NOT STARTED | 本次数据包使用 Native 0-shot generated-text 协议；Harness adapter、官方 few-shot/loglikelihood 和回归比较能力仍待 P1 退出门后实现 |
 
 状态枚举：`NOT STARTED`、`IN PROGRESS`、`BLOCKED`、`DONE`。只有实验断言和证据落盘后才能标记 `DONE`。
@@ -80,6 +80,9 @@
 | 2026-08-12 | 审核并冻结 GSM8K/MMLU 基础数据源 | 仅下载 `openai/gsm8k@740312add88f781978c0658806c59bc2815b9866` 和 `cais/mmlu@c30699e8356da336a370243923dbaf21066bb9fe` 的 README/test parquet；许可证均为 MIT；下载只写入项目 `hf_cache/`，明细见 `hf_cache/download-manifest.json` |
 | 2026-08-12 | 生成三套 Native benchmark 数据包 | GSM8K `1,319`、MMLU Lite `570`、MMLU Full `14,042`；Lite 按固定 seed 每 subject 取 10 条且是 Full 严格子集；数据 SHA-256 分别为 `e713b086...d4a53`、`b601ca6d...1e0c`、`d025717f...fea6`，source lock SHA-256 为 `c454b4f7...9f29` |
 | 2026-08-12 | 注册并部署 Native benchmark 数据包 | 三版本 API 重复注册均返回 `unchanged`；三数据集预检 `valid=true`、总计 `15,931` 条，并对 Lite+Full 重复选择发出警告；数据页和新建评测向导浏览器 smoke 通过；`58` unit/contract + `6` integration、Ruff、Compose config 和主栈健康检查通过；未创建正式 run，未产生外部模型调用 |
+| 2026-08-13 | 审计并修复 P1-13 Secret/SSRF 边界 | 精确域名白名单不再跳过 DNS/IP 禁止网段检查；loopback/link-local/metadata/未授权地址拒绝；worker 每个 shard 出站前重新解析校验；禁止通过 `extra_headers` 注入 Authorization/API-Key/Cookie；create/update/probe 统一返回稳定 `ENDPOINT_POLICY` |
+| 2026-08-13 | 完成 P1-13 隔离安全实验 | 独立库 `evalhub_p1_13_security`、Redis DB 12 和 `zihao` 安全容器完成 100 样本凭据流；mock 仅记录 Authorization SHA-256，101 次请求均匹配；API、17 表数据库、Celery payload、Redis、服务日志和证据目录完整 canary 命中均为 0；7 类 SSRF 和 3 类敏感 header 全部拒绝；13 项断言 PASS，证据 `artifacts/experiments/P1-13-secret-ssrf-20260813T082003Z/` |
+| 2026-08-13 | P1-13 后全量回归与主栈部署 | unit/contract `69 passed`；integration `6 passed`；Ruff、ESLint、Vite build、Chromium 桌面/移动 `2 passed`；安全实验数据库/Redis DB 12/容器已清理；主 API/worker 以非 root、无 GPU device mapping 运行，现有 Endpoint DNS 策略校验和 Web `10.170.38.103:18080` 均通过 |
 
 ## 1. 实验目标
 
@@ -249,7 +252,7 @@ count(distinct sample_id) = total_samples
 
 Phase 1 只有在以下条件全部满足时关闭：
 
-- [ ] P1-01 至 P1-13 全部通过，并保存证据目录。
+- [x] P1-01 至 P1-13 全部通过，并保存证据目录。
 - [ ] 第 18 节所有功能、正确性和非功能验收逐条映射到实验 ID。
 - [ ] `pytest` 包含 unit/contract/integration/E2E，主分支无跳过的关键测试。
 - [ ] 干净机器只需 `.env`、secret 和 `docker compose up -d --build` 即可启动。

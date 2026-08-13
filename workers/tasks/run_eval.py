@@ -14,6 +14,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from apps.api.app.core.crypto import SecretCipher
+from apps.api.app.core.network import validate_endpoint_url
 from apps.api.app.core.settings import get_settings
 from apps.api.app.db.models import (
     DatasetVersion,
@@ -494,6 +495,8 @@ async def _execute_shard_async(
             for execution in executions
         }
         manifest = version.manifest_json
+        settings = get_settings()
+        base_url = await validate_endpoint_url(revision.config_json["base_url"], settings)
         secret = SecretCipher().decrypt(revision.secret_ciphertext)
         headers = {
             **auth_headers(revision.config_json["auth_type"], secret),
@@ -508,13 +511,12 @@ async def _execute_shard_async(
     }
     renderer = JinjaPromptRenderer(request_spec, spec["model_name"])
     adapter = OpenAICompatibleAdapter(
-        base_url=revision.config_json["base_url"],
+        base_url=base_url,
         headers=headers,
         timeout_seconds=execution_config["timeout_seconds"],
         max_retries=execution_config["max_retries"],
     )
     semaphore = asyncio.Semaphore(execution_config["effective_concurrency"])
-    settings = get_settings()
     limiter = RedisEndpointLimiter(
         redis_url=settings.redis_url,
         endpoint_revision_id=revision.id,

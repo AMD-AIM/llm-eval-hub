@@ -93,14 +93,24 @@ def _intent(text: str) -> str:
 
 
 @app.post("/v1/chat/completions")
-async def chat(payload: ChatRequest):
+async def chat(payload: ChatRequest, request: Request):
     text = "\n".join(str(message.get("content", "")) for message in payload.messages)
     sample_match = re.search(r"\[sample-id:([A-Za-z0-9_-]+)\]", text)
     sample_id = sample_match.group(1) if sample_match else hashlib.sha256(text.encode()).hexdigest()
     attempt = _attempts_by_sample.get(sample_id, 0) + 1
     _attempts_by_sample[sample_id] = attempt
+    authorization = request.headers.get("authorization")
     _request_log.append(
-        {"sample_id": sample_id, "attempt": attempt, "monotonic_ns": time.monotonic_ns()}
+        {
+            "sample_id": sample_id,
+            "attempt": attempt,
+            "monotonic_ns": time.monotonic_ns(),
+            "authorization_sha256": (
+                hashlib.sha256(authorization.encode("utf-8")).hexdigest()
+                if authorization
+                else None
+            ),
+        }
     )
     fail_first = re.search(r"\[fail-first:(\d+):(\d{3})\]", text) if _faults_enabled else None
     if fail_first and attempt <= int(fail_first.group(1)):

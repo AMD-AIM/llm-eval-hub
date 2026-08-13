@@ -5,11 +5,22 @@ from typing import Any
 
 import httpx
 
-BLOCKED_HEADERS = {"host", "content-length", "transfer-encoding", "connection"}
+BLOCKED_HEADERS = {
+    "api-key",
+    "authorization",
+    "connection",
+    "content-length",
+    "cookie",
+    "host",
+    "proxy-authorization",
+    "set-cookie",
+    "transfer-encoding",
+    "x-api-key",
+}
 
 
 def sanitized_extra_headers(headers: dict[str, str]) -> dict[str, str]:
-    blocked = sorted(name for name in headers if name.lower() in BLOCKED_HEADERS)
+    blocked = sorted(name for name in headers if name.strip().lower() in BLOCKED_HEADERS)
     if blocked:
         raise ValueError(f"Forbidden extra headers: {blocked}")
     return headers

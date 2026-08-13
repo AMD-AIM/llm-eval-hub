@@ -262,6 +262,120 @@ services:
         condition: service_healthy
     profiles: [e2e]
 
+  security-mock-openai:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+    container_name: zihao-evalhub-security-mock-openai
+    command: uvicorn tests.fixtures.mock_openai:app --host 0.0.0.0 --port 8001
+    environment:
+      <<: *gpu-boundary
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/healthz')"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    profiles: [security]
+
+  security-api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+    container_name: zihao-evalhub-security-api
+    env_file: []
+    command: >-
+      sh -c "alembic upgrade head &&
+      uvicorn apps.api.app.main:app --host 0.0.0.0 --port 8000"
+    environment:
+      <<: *gpu-boundary
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/evalhub_p1_13_security
+      REDIS_URL: redis://redis:6379/12
+      CELERY_BROKER_URL: redis://redis:6379/12
+      CELERY_RESULT_BACKEND: redis://redis:6379/12
+      ARTIFACT_ROOT: /tmp/evalhub-artifacts
+      ADMIN_API_KEY: p1-13-admin-test-key
+      SECRET_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      ALLOWED_ENDPOINT_HOSTS: security-mock-openai,rebind.p1-13.invalid
+      ALLOWED_ENDPOINT_CIDRS: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      ALLOW_INSECURE_HTTP: "true"
+      WEB_ORIGIN: http://security-web.invalid
+    extra_hosts:
+      - "rebind.p1-13.invalid:127.0.0.1"
+      - "unauthorized.p1-13.invalid:198.51.100.10"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      security-mock-openai:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+    profiles: [security]
+
+  security-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+    container_name: zihao-evalhub-security-worker
+    env_file: []
+    command: celery -A workers.celery_app worker -Q native --concurrency=4 --loglevel=INFO
+    environment:
+      <<: *gpu-boundary
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/evalhub_p1_13_security
+      REDIS_URL: redis://redis:6379/12
+      CELERY_BROKER_URL: redis://redis:6379/12
+      CELERY_RESULT_BACKEND: redis://redis:6379/12
+      ARTIFACT_ROOT: /tmp/evalhub-artifacts
+      ADMIN_API_KEY: p1-13-admin-test-key
+      SECRET_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      ALLOWED_ENDPOINT_HOSTS: security-mock-openai,rebind.p1-13.invalid
+      ALLOWED_ENDPOINT_CIDRS: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+      ALLOW_INSECURE_HTTP: "true"
+      WEB_ORIGIN: http://security-web.invalid
+    extra_hosts:
+      - "rebind.p1-13.invalid:127.0.0.1"
+      - "unauthorized.p1-13.invalid:198.51.100.10"
+    depends_on:
+      security-api:
+        condition: service_healthy
+    profiles: [security]
+
+  security-experiment:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: test
+    container_name: zihao-evalhub-security-experiment
+    command: python -m tests.experiments.run_security exercise
+    environment:
+      <<: *gpu-boundary
+      APP_ENV: test
+      DATABASE_URL: postgresql+psycopg://evalhub:${POSTGRES_PASSWORD:-evalhub}@postgres:5432/evalhub_p1_13_security
+      REDIS_URL: redis://redis:6379/12
+      CELERY_BROKER_URL: redis://redis:6379/12
+      CELERY_RESULT_BACKEND: redis://redis:6379/12
+      ADMIN_API_KEY: p1-13-admin-test-key
+      SECRET_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      EVALHUB_SECURITY_API_URL: http://security-api:8000
+      EVALHUB_SECURITY_MOCK_URL: http://security-mock-openai:8001
+      EVALHUB_GIT_SHA: ${EVALHUB_GIT_SHA:-working-tree}
+      EVALHUB_COMPOSE_CONFIG_SHA256: ${EVALHUB_COMPOSE_CONFIG_SHA256:-working-tree}
+    volumes:
+      - ./artifacts:/workspace/artifacts
+    depends_on:
+      security-api:
+        condition: service_healthy
+    profiles: [security]
+
   integration-tests:
     build:
       context: .
