@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -10,7 +10,7 @@ from apps.api.app.core.crypto import SecretCipher
 from apps.api.app.core.network import EndpointPolicyError, validate_endpoint_url
 from apps.api.app.core.settings import Settings, get_settings
 from apps.api.app.db import get_db
-from apps.api.app.db.models import Endpoint, EndpointCapability, EndpointRevision, Model
+from apps.api.app.db.models import Endpoint, EndpointCapability, EndpointRevision, Model, Run
 from apps.api.app.schemas.endpoints import (
     EndpointCreate,
     EndpointModelCreate,
@@ -59,6 +59,8 @@ def _serialize_endpoint(db: Session, endpoint: Endpoint) -> EndpointRead:
         active_revision_id=endpoint.active_revision_id,
         api_key_configured=revision.secret_ciphertext is not None,
         secret_hint=revision.secret_hint,
+        concurrency_limit=revision.config_json.get("concurrency_limit", 8),
+        qps_limit=revision.config_json.get("qps_limit", 10),
         capability=capability.capabilities_json if capability else None,
         created_at=endpoint.created_at,
         updated_at=endpoint.updated_at,
@@ -165,7 +167,13 @@ async def update_endpoint(
             changes.get("base_url", endpoint.base_url), settings
         )
         config = dict(previous.config_json)
-        config.update({key: value for key, value in changes.items() if key != "api_key"})
+        config.update(
+            {
+                key: value
+                for key, value in changes.items()
+                if key not in {"api_key", "name"}
+            }
+        )
         config["base_url"] = base_url
         config["extra_headers"] = sanitized_extra_headers(config.get("extra_headers", {}))
     except (EndpointPolicyError, ValueError) as exc:
@@ -196,8 +204,48 @@ async def update_endpoint(
         resource_type="endpoint",
         resource_id=endpoint.id,
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail={"code": "ENDPOINT_NAME_EXISTS"}) from exc
     return _serialize_endpoint(db, endpoint)
+
+
+@router.delete("/{endpoint_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_endpoint(
+    endpoint_id: str,
+    actor: Actor = Depends(require_actor),
+    db: Session = Depends(get_db),
+) -> Response:
+    endpoint = db.get(Endpoint, endpoint_id)
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail={"code": "ENDPOINT_NOT_FOUND"})
+    referenced_run_id = db.scalar(
+        select(Run.id)
+        .join(EndpointRevision, Run.endpoint_revision_id == EndpointRevision.id)
+        .where(EndpointRevision.endpoint_id == endpoint.id)
+        .limit(1)
+    )
+    if referenced_run_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "ENDPOINT_IN_USE",
+                "message": "该 Endpoint 已被历史评测引用，不能永久删除。",
+            },
+        )
+    record_audit(
+        db,
+        actor=actor.username,
+        action="endpoint.delete",
+        resource_type="endpoint",
+        resource_id=endpoint.id,
+        metadata={"name": endpoint.name},
+    )
+    db.delete(endpoint)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{endpoint_id}/probe", response_model=ProbeResponse)

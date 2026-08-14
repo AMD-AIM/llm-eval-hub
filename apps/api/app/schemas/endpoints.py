@@ -37,6 +37,8 @@ class EndpointRead(BaseModel):
     active_revision_id: str | None
     api_key_configured: bool = False
     secret_hint: str | None = None
+    concurrency_limit: int
+    qps_limit: float
     capability: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime

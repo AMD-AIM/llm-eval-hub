@@ -95,7 +95,10 @@ td code { max-width: 340px; display: inline-block; color: #4f5c56; font-size: 10
 .strong-link { color: #1c2823; font-weight: 700; font-size: 11px; }
 .strong-link:hover { color: var(--accent); }
 .table-sub { display: block; margin-top: 3px; color: #8a938f; font-size: 9px; }
-.actions-column { width: 64px; text-align: right; }
+.actions-column { width: 132px; text-align: right; }
+.endpoint-actions { display: flex; justify-content: flex-end; gap: 5px; }
+.danger-icon { color: var(--red); border-color: #dfb8b4; }
+.danger-icon:hover { color: var(--red); background: var(--red-soft); }
 .status { display: inline-flex; align-items: center; min-height: 22px; padding: 0 7px; border-radius: 4px; background: #eef1ef; color: #59635e; font-size: 9px; font-weight: 750; text-transform: uppercase; white-space: nowrap; }
 .status-healthy, .status-succeeded { color: #166253; background: #dff2ea; }
 .status-running, .status-preparing, .status-aggregating { color: #245c98; background: #e4eef9; }
@@ -132,6 +135,7 @@ textarea { resize: vertical; }
 input:focus, select:focus, textarea:focus { border-color: #3b8f83; box-shadow: 0 0 0 3px #e5f2ee; }
 .form-actions { padding-top: 3px; display: flex; justify-content: flex-end; gap: 8px; }
 .form-error, .error-banner { padding: 10px 12px; color: #873632; background: var(--red-soft); border: 1px solid #edc8c4; border-radius: 5px; font-size: 11px; }
+.delete-copy { margin: 0; color: #4a554f; font-size: 12px; line-height: 1.65; }
 .error-banner { margin-bottom: 18px; display: flex; align-items: center; gap: 8px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

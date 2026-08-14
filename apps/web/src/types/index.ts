@@ -17,6 +17,8 @@ export interface Endpoint {
   active_revision_id: string;
   api_key_configured: boolean;
   secret_hint: string | null;
+  concurrency_limit: number;
+  qps_limit: number;
   capability: EndpointCapability | null;
   created_at: string;
   updated_at: string;

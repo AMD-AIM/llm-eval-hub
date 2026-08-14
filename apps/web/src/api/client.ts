@@ -1,3 +1,5 @@
+import { readResponseBody } from "./response";
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 const KEY_STORAGE = "evalhub.apiKey";
 
@@ -58,14 +60,10 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (!response.ok) {
-    let detail: unknown;
-    try {
-      detail = await response.json();
-    } catch {
-      detail = await response.text();
-    }
+    const detail = await readResponseBody(response);
     throw new ApiError(response.status, detail);
   }
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
