@@ -1,71 +1,169 @@
 # LLM Eval Hub
 
-面向公司内部 OpenAI-compatible 模型 API 的可复现自动化测评平台。当前实现以项目计划中的 Phase 1 vertical slice 为目标，包含 endpoint 管理、数据集导入、异步评测、指标与失败样本查看。
+LLM Eval Hub is a self-hosted evaluation platform for OpenAI-compatible model APIs. It
+provides endpoint registration, immutable endpoint revisions, versioned datasets,
+asynchronous evaluation runs, per-sample diagnostics, metrics, exports, and audit logs.
 
-## 本地启动
+The current release is the completed Phase 1 MVP. It is designed for an internal trusted
+network and a small operator group. It is not a multi-tenant public service.
+
+## What is included
+
+- OpenAI-compatible `/v1/chat/completions` endpoint registration and capability probing
+- Encrypted endpoint credentials and immutable configuration revisions
+- Editable endpoint settings and guarded endpoint deletion
+- YAML + JSONL dataset import with checksums and schema validation
+- PostgreSQL-backed run state and Celery workers with Redis scheduling limits
+- Shared endpoint concurrency and QPS enforcement across runs and workers
+- Retry, cancellation, worker recovery, live progress, per-sample inspection, and exports
+- Numeric, exact-match, and classification parsers/scorers with reproducible run fingerprints
+- Frozen native-chat benchmark packs for GSM8K and MMLU
+- Unit, contract, integration, browser, capacity, fault, recovery, and security tests
+
+## Production deployment
+
+Prerequisites:
+
+- Linux with Docker Engine 24 or newer
+- Docker Compose v2.20 or newer
+- `openssl`
+- At least 4 CPU cores, 8 GB RAM, and 20 GB free disk for a small installation
+
+No GPU is required. LLM Eval Hub calls remote or network-accessible model APIs.
+
+```bash
+git clone <repository-url> llm-eval-hub
+cd llm-eval-hub
+
+./scripts/generate_deploy_env.sh .env.deploy http://SERVER_IP:18080
+# Edit .env.deploy and configure ALLOWED_ENDPOINT_HOSTS/CIDRS.
+
+./scripts/deploy.sh --env-file .env.deploy --with-benchmarks
+```
+
+Open `http://SERVER_IP:18080`. In the application settings, enter the `ADMIN_API_KEY`
+from `.env.deploy`. The API documentation is bound to localhost by default at
+`http://localhost:18000/docs`.
+
+The production deployment uses [compose.deploy.yml](compose.deploy.yml). It contains only
+PostgreSQL, Redis, the API, the worker, the web UI, and optional maintenance/bootstrap jobs.
+The original [docker-compose.yml](docker-compose.yml) remains the development and regression
+test stack and includes mock and experiment services.
+
+Read [Deployment Guide](doc/DEPLOYMENT.md) before exposing the service outside a trusted LAN.
+
+## Register an OpenAI-compatible endpoint
+
+Given a provider request such as:
+
+```bash
+curl https://provider.example/v1/chat/completions \
+  -H "Authorization: Bearer <provider-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"example-model","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+register it with these values:
+
+- Base URL: `https://provider.example/v1`
+- Authentication: `Bearer`
+- Model ID: `example-model`
+- API key: the provider key, entered only in the encrypted credential field
+
+The public hostname must be listed in `ALLOWED_ENDPOINT_HOSTS`. Private endpoints must fall
+inside `ALLOWED_ENDPOINT_CIDRS`. Set `ALLOW_INSECURE_HTTP=true` only when a trusted internal
+endpoint requires plain HTTP.
+
+Do not place `Authorization`, `api-key`, `X-API-Key`, cookies, or other credentials in custom
+headers. The API rejects sensitive headers so secrets cannot enter ordinary JSON config,
+fingerprints, or worker messages.
+
+## Bundled benchmark packs
+
+| Dataset | Samples | Protocol |
+| --- | ---: | --- |
+| `gsm8k-native` | 1,319 | Test split, zero-shot generated numeric answer |
+| `mmlu-lite-native` | 570 | Ten fixed samples from each of 57 subjects |
+| `mmlu-full-native` | 14,042 | Full test split across 57 subjects |
+
+MMLU Lite is a strict subset of MMLU Full. Select one of them for a run to avoid duplicate
+requests. These are native chat-generation protocols; their results are not directly
+equivalent to official log-likelihood-based leaderboard scores.
+
+Benchmark source revisions, checksums, and sampling rules are frozen in
+`datasets/benchmarks/source-lock.json`.
+
+## Backup
+
+Run backups only when no evaluation is being started or modified:
+
+```bash
+./scripts/backup.sh --env-file .env.deploy
+```
+
+The backup contains PostgreSQL state, dataset artifacts, checksums, and a protected copy of
+the deployment environment. Store the complete directory securely. The encryption key is
+required to decrypt registered endpoint credentials after a restore.
+
+Restore with `scripts/restore.sh`, which requires an explicit destructive-confirmation flag and
+checks that the encryption key matches the backup. See
+[Operations Guide](doc/OPERATIONS.md) for recovery, upgrades, monitoring, and troubleshooting.
+
+## Development
+
+The development stack uses `.env` and includes a deterministic mock OpenAI service:
 
 ```bash
 cp .env.example .env
-# 设置 ADMIN_API_KEY，并用 `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` 生成 SECRET_ENCRYPTION_KEY
+python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+# Put the generated value in SECRET_ENCRYPTION_KEY.
+
 docker compose up -d --build
 ```
 
-- Web: <http://localhost:18080>
-- API 文档: <http://localhost:18000/docs>
-- Mock OpenAI API: <http://localhost:18001/v1>
+Default development addresses:
 
-开发环境默认管理密钥为 `zihao-local-dev-key`，只可用于本机验证。所有容器和持久卷使用 `zihao` 前缀。
+- Web UI: `http://localhost:18080`
+- API docs: `http://localhost:18000/docs`
+- Mock OpenAI API: `http://localhost:18001/v1`
 
-## 测试真实 OpenAI-compatible API
-
-1. 打开 Web 的 `Endpoints`，点击“登记 Endpoint”。
-2. `Base URL` 填供应商提供的 OpenAI API 根地址；末尾没有 `/v1` 时平台会自动补齐。
-3. `Model ID` 填供应商要求的精确模型名，例如 `minicpm-v`。
-4. 标准 OpenAI 认证选择 `Bearer`，在密码输入框填写 API Key，然后“保存并探测”。
-5. Endpoint 状态变为 `healthy` 后，进入“新建测评”，选择模型、数据集版本和执行参数并创建运行。
-6. 运行详情页通过 SSE 显示实时进度，并提供逐样本结果、失败筛选和 CSV/JSONL 导出。
-
-供应商不提供 `/v1/models` 时，探测会使用手工填写的 Model ID。公网域名仍受 `ALLOWED_ENDPOINT_HOSTS` 精确白名单约束；当前 Compose 默认允许 `developer.amd.com.cn`，不要通过放开全部公网 CIDR 绕过 SSRF 防护。精确白名单域名仍会执行 DNS/IP 禁止网段检查，worker 在模型请求前会重新校验，HTTP 重定向默认禁用。
-
-API Key 必须填写在 Endpoint 的加密凭据字段中。平台拒绝在 `extra_headers` 中配置 `Authorization`、`api-key`、`X-API-Key`、Cookie 等敏感 header，避免凭据进入普通 JSON 配置、fingerprint 或任务载荷。
-
-当前 Native Engine 只发送文本 `chat/completions`。主库已经注册 12 条中文意图分类数据，以及下面三套冻结 benchmark 数据。图片输入、C-Eval 和官方 Harness/loglikelihood 协议尚未接入，Native MMLU 的结果不能直接等同于官方 MMLU 分数。
-
-## 基础 Benchmark 数据
-
-| 数据集 | 样本数 | Native 协议 |
-|---|---:|---|
-| `gsm8k-native` | 1,319 | test split，0-shot 生成最终数字 |
-| `mmlu-lite-native` | 570 | 57 个 subject 各固定抽样 10 条，0-shot 生成选项字母 |
-| `mmlu-full-native` | 14,042 | all/test 完整 57 个 subject，0-shot 生成选项字母 |
-
-`mmlu-lite-native` 是 Full 的严格子集，单次评测应二选一；同时选择时预检会提示重复样本和重复 API 请求。数据源 revision、输入/输出 SHA-256 和抽样规则冻结在 `datasets/benchmarks/source-lock.json`。
-
-从固定上游 revision 重新准备并幂等注册数据：
+Local setup and validation:
 
 ```bash
-make bootstrap-data
-make prepare-benchmarks
-make register-benchmarks
+make bootstrap
+make test
+make test-integration
+make lint
+cd apps/web && npm run lint && npm run build
 ```
 
-## Hugging Face 数据目录
+Additional experiment targets are available in the [Makefile](Makefile), including browser
+E2E, capacity, shared-QPS, cancellation, worker-crash, restart/restore, and security runs.
 
-项目不会在服务启动时自动下载 Hugging Face 数据。`make prepare-benchmarks` 的下载必须使用仓库内路径：
+## Repository layout
 
-```bash
-export HF_HOME="$PWD/hf_cache"
-export HF_HUB_CACHE="$PWD/hf_cache/hub"
-export HF_DATASETS_CACHE="$PWD/hf_cache/datasets"
-export HUGGINGFACE_HUB_CACHE="$PWD/hf_cache/hub"
+```text
+apps/api/          FastAPI application and Alembic migrations
+apps/web/          React/Vite UI served by Nginx
+packages/          Evaluation engine, adapters, parsers, scorers, and aggregators
+workers/           Celery worker and Redis-backed scheduling
+datasets/          Dataset schemas, deterministic fixtures, and benchmark packs
+scripts/           Benchmark preparation, deployment, and backup tools
+tests/             Unit, contract, integration, browser, and fault experiments
+doc/               English project, deployment, and operations documentation
 ```
 
-Compose 已固定同样的容器内映射，下载内容最终落在本仓库 `hf_cache/` 下。
+## Current limitations
 
-## 安全回归
+- Authentication is a single administrator API key; SSO, OIDC, and RBAC are not implemented.
+- The native engine currently supports text chat completions only.
+- There is no automatic circuit breaker for long sequences of provider 403/5xx responses.
+- Cancelled runs may not have aggregate metrics and can retain a non-terminal child-dataset
+  display state even though sample facts remain available.
+- Endpoint revisions used by existing runs are immutable. Editing an endpoint affects only
+  future runs.
+- Secret-encryption-key rotation requires an explicit migration and is not automated.
 
-```bash
-make test-security
-```
-
-该命令使用独立 PostgreSQL 数据库、Redis DB 12 和 `zihao` 测试容器运行 P1-13；扫描 API 响应、数据库、Celery/Redis payload、服务日志和证据目录，并验证 loopback、metadata、越权域名及敏感认证 header 均被稳定拒绝。测试只访问隔离 mock，不会调用已登记的真实模型 API。
+The detailed MVP evidence and remaining roadmap are summarized in
+[MVP Exit Report](doc/MVP_Benchmark_Regression_Experiment_Plan.md) and
+[Project Plan](doc/LLM_Evaluation_Platform_Project_Plan.md).

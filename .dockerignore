@@ -9,3 +9,5 @@ artifacts
 hf_cache
 secrets
 .env
+.env.deploy
+backups

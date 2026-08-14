@@ -15,6 +15,7 @@ COPY packages ./packages
 COPY workers ./workers
 COPY tests ./tests
 COPY datasets ./datasets
+COPY scripts ./scripts
 
 RUN pip install --no-deps . && \
     groupadd --gid 1024 evalhub && \

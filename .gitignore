@@ -1,4 +1,5 @@
 .env
+.env.deploy
 .venv/
 __pycache__/
 *.py[cod]
@@ -18,5 +19,6 @@ hf_cache/*
 !hf_cache/.gitkeep
 secrets/*
 !secrets/.gitkeep
+backups/
 *.log
 .DS_Store
