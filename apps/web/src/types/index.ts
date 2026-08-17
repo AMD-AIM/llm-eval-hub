@@ -121,6 +121,7 @@ export interface RunMetrics {
     run_dataset_id: string;
     dataset_version_id: string;
     protocol_id: string;
+    primary_metric: string;
     metrics: Record<string, number | null>;
     denominators: Record<string, number>;
     metadata: Record<string, Record<string, unknown>>;

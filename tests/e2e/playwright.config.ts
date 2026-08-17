@@ -19,7 +19,7 @@ export default defineConfig({
   use: {
     baseURL: process.env.E2E_BASE_URL || "http://e2e-web",
     viewport: { width: 1440, height: 1000 },
-    locale: "zh-CN",
+    locale: "en-US",
     timezoneId: "Asia/Shanghai",
     colorScheme: "light",
     reducedMotion: "reduce",

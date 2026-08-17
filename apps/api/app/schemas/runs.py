@@ -101,9 +101,27 @@ class SampleExecutionRead(BaseModel):
     score_reason: str | None = None
 
 
+class RunMetricGroupRead(BaseModel):
+    group_key: str
+    group_value: str
+    metrics: dict[str, float | None]
+    denominators: dict[str, int]
+
+
+class RunDatasetMetricsRead(BaseModel):
+    run_dataset_id: str
+    dataset_version_id: str
+    protocol_id: str
+    primary_metric: str
+    metrics: dict[str, float | None]
+    denominators: dict[str, int]
+    metadata: dict[str, dict[str, Any]]
+    groups: list[RunMetricGroupRead]
+
+
 class RunMetricsRead(BaseModel):
     run_id: str
-    datasets: list[dict[str, Any]]
+    datasets: list[RunDatasetMetricsRead]
 
 
 class ExportFormat(BaseModel):

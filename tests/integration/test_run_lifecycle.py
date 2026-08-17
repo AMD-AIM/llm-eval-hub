@@ -11,6 +11,7 @@ from celery.contrib.testing.worker import start_worker
 from sqlalchemy import create_engine, distinct, func, select
 from sqlalchemy.orm import sessionmaker
 
+from apps.api.app.api.v1.runs import get_run_metrics
 from apps.api.app.db.models import (
     Dataset,
     DatasetVersion,
@@ -197,6 +198,8 @@ def test_celery_run_lifecycle_is_complete_and_idempotent(monkeypatch: pytest.Mon
                 )
             )
             assert accuracy == 1.0
+            metrics_response = get_run_metrics(run_id, db=db)
+            assert metrics_response.datasets[0].primary_metric == "accuracy"
         engine.dispose()
 
     redis_client.flushdb()

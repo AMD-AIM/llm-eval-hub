@@ -145,15 +145,15 @@ test.describe("P1-12 Browser E2E", () => {
     await test.step("register and probe endpoint", async () => {
       await page.goto("/endpoints");
       await expect(page.getByRole("heading", { name: "Endpoints" })).toBeVisible();
-      await page.locator(".page-heading").getByRole("button", { name: "登记 Endpoint" }).click();
-      const dialog = page.getByRole("dialog", { name: "登记 Endpoint" });
-      await dialog.getByLabel("名称").fill(endpointName);
-      await dialog.getByLabel("认证方式").selectOption("none");
+      await page.locator(".page-heading").getByRole("button", { name: "Register Endpoint" }).click();
+      const dialog = page.getByRole("dialog", { name: "Register Endpoint" });
+      await dialog.getByLabel("Name").fill(endpointName);
+      await dialog.getByLabel("Authentication").selectOption("none");
       await dialog.getByLabel("Base URL").fill("http://e2e-mock-openai:8001/v1");
       await dialog.getByLabel("Model ID").fill("mock-intent-v1");
-      await dialog.getByLabel("并发上限").fill("4");
-      await dialog.getByLabel("QPS 上限").fill("100");
-      await dialog.getByRole("button", { name: "保存" }).click();
+      await dialog.getByLabel("Concurrency Limit").fill("4");
+      await dialog.getByLabel("QPS Limit").fill("100");
+      await dialog.getByRole("button", { name: "Save and Probe" }).click();
       const row = page.getByRole("row").filter({ hasText: endpointName });
       await expect(row).toBeVisible();
       await expect(row.getByText("healthy", { exact: true })).toBeVisible();
@@ -165,19 +165,19 @@ test.describe("P1-12 Browser E2E", () => {
 
     await test.step("create dataset and upload frozen version", async () => {
       await page.goto("/datasets");
-      await page.locator(".page-heading").getByRole("button", { name: "新建数据集" }).click();
-      const createDialog = page.getByRole("dialog", { name: "新建数据集" });
-      await createDialog.getByLabel("标识名").fill(datasetName);
-      await createDialog.getByLabel("显示名称").fill("MVP Golden V1");
-      await createDialog.getByLabel("说明").fill("P1-12 isolated browser E2E fixture");
-      await createDialog.getByRole("button", { name: "创建" }).click();
+      await page.locator(".page-heading").getByRole("button", { name: "New Dataset" }).click();
+      const createDialog = page.getByRole("dialog", { name: "New Dataset" });
+      await createDialog.getByLabel("Identifier").fill(datasetName);
+      await createDialog.getByLabel("Display Name").fill("MVP Golden V1");
+      await createDialog.getByLabel("Description").fill("P1-12 isolated browser E2E fixture");
+      await createDialog.getByRole("button", { name: "Create" }).click();
       const datasetRow = page.locator(".dataset-row").filter({ hasText: datasetName });
       await expect(datasetRow).toBeVisible();
-      await datasetRow.getByRole("button", { name: "上传版本" }).click();
-      const uploadDialog = page.getByRole("dialog", { name: /上传版本/ });
+      await datasetRow.getByRole("button", { name: "Upload Version" }).click();
+      const uploadDialog = page.getByRole("dialog", { name: /Upload Version/ });
       await uploadDialog.locator('input[type="file"]').nth(0).setInputFiles(manifestPath);
       await uploadDialog.locator('input[type="file"]').nth(1).setInputFiles(dataPath);
-      await uploadDialog.getByRole("button", { name: "校验并上传" }).click();
+      await uploadDialog.getByRole("button", { name: "Validate and Upload" }).click();
       await expect(datasetRow.getByText("100 samples", { exact: false })).toBeVisible();
       await assertLayout(page, "desktop dataset");
       await saveScreenshot(page, "desktop-02-dataset.png");
@@ -188,19 +188,19 @@ test.describe("P1-12 Browser E2E", () => {
       await page.goto("/evaluations/new");
       await page.getByRole("button", { name: new RegExp(endpointName) }).click();
       await page.getByLabel("Model ID").selectOption({ label: "mock-intent-v1" });
-      await page.getByRole("button", { name: /下一步/ }).click();
+      await page.getByRole("button", { name: /Next/ }).click();
       await page.getByText(/MVP Golden V1 · 1.0.0/).click();
-      await page.getByRole("button", { name: /下一步/ }).click();
-      await page.getByLabel("运行名称").fill(runName);
-      await page.getByLabel("并发", { exact: true }).fill("2");
+      await page.getByRole("button", { name: /Next/ }).click();
+      await page.getByLabel("Run Name").fill(runName);
+      await page.getByLabel("Concurrency", { exact: true }).fill("2");
       await page.getByLabel("QPS", { exact: true }).fill("100");
-      await page.getByRole("button", { name: /下一步/ }).click();
-      await expect(page.getByText("预检通过", { exact: true })).toBeVisible();
-      await expect(page.getByText(/100 个样本，实际并发 2/)).toBeVisible();
+      await page.getByRole("button", { name: /Next/ }).click();
+      await expect(page.getByText("Preflight Passed", { exact: true })).toBeVisible();
+      await expect(page.getByText(/100 samples, effective concurrency 2/)).toBeVisible();
 
       const sseResponse = page.waitForResponse((response) => response.url().includes("/events") && response.status() === 200);
       const createResponse = page.waitForResponse((response) => response.request().method() === "POST" && /\/api\/v1\/runs$/.test(response.url()) && response.status() === 202);
-      await page.getByRole("button", { name: "创建并运行" }).click();
+      await page.getByRole("button", { name: "Create and Run" }).click();
       const response = await createResponse;
       const body = await response.json() as { id: string };
       runId = body.id;
@@ -224,12 +224,12 @@ test.describe("P1-12 Browser E2E", () => {
     await test.step("inspect results, filter samples and validate exports", async () => {
       await expect(page.locator(".run-heading").getByText("SUCCEEDED", { exact: true })).toBeVisible({ timeout: 120_000 });
       await expect(page.locator(".primary-metric").getByText("100.0%", { exact: true })).toBeVisible();
-      await expect(page.getByText("暂无匹配样本", { exact: true })).toBeVisible();
+      await expect(page.getByText("No matching samples", { exact: true })).toBeVisible();
       await assertLayout(page, "desktop result");
       await saveScreenshot(page, "desktop-04-result.png");
 
       const jsonlDownloadPromise = page.waitForEvent("download");
-      await page.getByTitle("导出 JSONL").click();
+      await page.getByTitle("Export JSONL").click();
       const jsonlDownload = await jsonlDownloadPromise;
       const jsonlPath = path.join(evidenceDir, "downloads", "run.jsonl");
       await jsonlDownload.saveAs(jsonlPath);
@@ -237,15 +237,15 @@ test.describe("P1-12 Browser E2E", () => {
       expect(jsonlLines).toHaveLength(100);
       for (const line of jsonlLines) JSON.parse(line);
 
-      await page.getByRole("button", { name: "样本", exact: true }).click();
-      await page.locator(".segmented").getByRole("button", { name: "SUCCEEDED", exact: true }).click();
+      await page.getByRole("button", { name: "Samples", exact: true }).click();
+      await page.locator(".segmented").getByRole("button", { name: "PASSED", exact: true }).click();
       await expect(page.locator(".clickable-row")).toHaveCount(100);
       await page.locator(".clickable-row").first().click();
       await expect(page.locator(".sample-panel")).toBeVisible();
       await expect(page.locator(".sample-panel").getByText(/mvp-golden-v1-/).first()).toBeVisible();
-      await page.locator(".sample-panel").getByRole("button", { name: "关闭" }).click();
+      await page.locator(".sample-panel").getByRole("button", { name: "Close" }).click();
       await page.locator(".segmented").getByRole("button", { name: "FAILED", exact: true }).click();
-      await expect(page.getByText("暂无匹配样本", { exact: true })).toBeVisible();
+      await expect(page.getByText("No matching samples", { exact: true })).toBeVisible();
 
       const csvDownloadPromise = page.waitForEvent("download");
       await page.getByRole("button", { name: "CSV", exact: true }).click();
@@ -261,7 +261,7 @@ test.describe("P1-12 Browser E2E", () => {
 
     await test.step("find terminal run in history", async () => {
       await page.goto("/runs");
-      await page.getByPlaceholder("搜索运行名称").fill(runName);
+      await page.getByPlaceholder("Search runs").fill(runName);
       await page.locator(".filterbar .segmented").getByRole("button", { name: "SUCCEEDED", exact: true }).click();
       await expect(page.getByRole("link", { name: runName, exact: true })).toBeVisible();
       await assertLayout(page, "desktop run history");
@@ -288,22 +288,22 @@ test.describe("P1-12 Browser E2E", () => {
 
   test("mobile result, navigation and layout", async ({ browser }) => {
     expect(runId).not.toBe("");
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: "zh-CN", timezoneId: "Asia/Shanghai", reducedMotion: "reduce" });
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: "en-US", timezoneId: "Asia/Shanghai", reducedMotion: "reduce" });
     await context.addInitScript((key: string) => window.localStorage.setItem("evalhub.apiKey", key), apiKey);
     const page = await context.newPage();
     const runtimeErrors = installRuntimeDiagnostics(page);
     await page.goto(`/runs/${runId}`);
     await expect(page.locator(".run-heading").getByText("SUCCEEDED", { exact: true })).toBeVisible();
-    await expect(page.getByTitle("打开导航")).toBeVisible();
+    await expect(page.getByTitle("Open navigation")).toBeVisible();
     await expect(page.locator(".sidebar")).not.toBeInViewport();
-    await page.getByTitle("打开导航").click();
+    await page.getByTitle("Open navigation").click();
     await expect(page.locator(".sidebar")).toBeInViewport();
-    await page.locator(".sidebar").getByRole("link", { name: "运行记录" }).click();
-    await expect(page.getByRole("heading", { name: "运行记录" })).toBeVisible();
+    await page.locator(".sidebar").getByRole("link", { name: "Runs" }).click();
+    await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
     await page.getByRole("link", { name: runName, exact: true }).click();
     await expect(page.locator(".primary-metric").getByText("100.0%", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "样本", exact: true }).click();
-    await page.locator(".segmented").getByRole("button", { name: "SUCCEEDED", exact: true }).click();
+    await page.getByRole("button", { name: "Samples", exact: true }).click();
+    await page.locator(".segmented").getByRole("button", { name: "PASSED", exact: true }).click();
     await expect(page.locator(".clickable-row").first()).toBeVisible();
     await assertLayout(page, "mobile result and samples");
     const mobileViewport = path.join(evidenceDir, "screenshots", "mobile-00-viewport.png");

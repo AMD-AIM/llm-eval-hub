@@ -113,6 +113,17 @@ def _dataset_selection_warnings(versions: list[DatasetVersion]) -> list[str]:
     return warnings
 
 
+def _primary_metric_name(version: DatasetVersion | None) -> str:
+    if version is None:
+        return "accuracy"
+    primary_metric = (
+        version.manifest_json.get("protocol", {})
+        .get("scorer", {})
+        .get("primary_metric", "accuracy")
+    )
+    return primary_metric if isinstance(primary_metric, str) and primary_metric else "accuracy"
+
+
 @router.post("/validate", response_model=RunValidationResponse)
 def validate_run(
     payload: RunCreate,
@@ -366,6 +377,7 @@ def get_run_metrics(
         raise HTTPException(status_code=404, detail={"code": "RUN_NOT_FOUND"})
     result = []
     for run_dataset in run_datasets:
+        version = db.get(DatasetVersion, run_dataset.dataset_version_id)
         metrics = db.scalars(
             select(RunMetric).where(RunMetric.run_dataset_id == run_dataset.id)
         ).all()
@@ -379,6 +391,7 @@ def get_run_metrics(
                 "run_dataset_id": run_dataset.id,
                 "dataset_version_id": run_dataset.dataset_version_id,
                 "protocol_id": run_dataset.protocol_id,
+                "primary_metric": _primary_metric_name(version),
                 "metrics": {metric.metric_name: metric.value for metric in overall},
                 "denominators": {
                     metric.metric_name: metric.denominator

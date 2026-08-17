@@ -232,7 +232,10 @@ def delete_endpoint(
             status_code=409,
             detail={
                 "code": "ENDPOINT_IN_USE",
-                "message": "该 Endpoint 已被历史评测引用，不能永久删除。",
+                "message": (
+                    "This endpoint is referenced by historical evaluations and cannot be "
+                    "permanently deleted."
+                ),
             },
         )
     record_audit(

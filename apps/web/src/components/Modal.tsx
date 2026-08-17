@@ -21,7 +21,7 @@ export function Modal({ title, open, onClose, children }: Props) {
       >
         <header>
           <h2>{title}</h2>
-          <button className="icon-button" type="button" onClick={onClose} title="关闭">
+          <button className="icon-button" type="button" onClick={onClose} title="Close">
             <X size={18} />
           </button>
         </header>
@@ -30,4 +30,3 @@ export function Modal({ title, open, onClose, children }: Props) {
     </div>
   );
 }
-
